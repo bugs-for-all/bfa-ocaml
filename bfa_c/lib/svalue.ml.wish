@@ -1,0 +1,44 @@
+(* What I would like to be writing to declare SValue, including the typed interface *)
+
+[%smt:
+
+#use hashcons
+
+module Seq = Smt.Seq
+
+module Int = Smt.Int
+
+
+module SOption = struct
+
+  type 'a t = SNone | SSome of 'a
+  let unwrap v =
+    match v with
+    | Some v -> v
+    | _ -> .
+  
+end
+
+module Ptr = struct
+  type loc [@@smt int]
+  type t = { loc: loc; ofs: int }
+  let null_loc = 0 [@@opaque]
+  let null = { loc: 0; ofs: 0 }
+end
+
+
+let int_of_bool (b: bool) = if b then 1 else 0
+
+]
+
+(* This should produce *)
+
+module Untyped = struct
+
+  type t svalue = 
+    | Bool of bool
+    | Int of int
+    | Ptr of Ptr.ptr
+    | SOption of t SOption.t
+
+end

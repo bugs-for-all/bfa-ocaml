@@ -1,0 +1,50 @@
+module type S = sig
+  (** Receives file name of where to log *)
+  val init : string -> unit
+
+  val close : unit -> unit
+  val with_parent : string -> (unit -> 'a) -> 'a
+end
+
+module No_log : S = struct
+  let init _ = ()
+  let close () = ()
+  let with_parent _ f = f ()
+end
+
+module Json_log : S = struct
+  let ic = ref None
+
+  let write_json j =
+    match !ic with
+    | None -> ()
+    | Some ic -> Yojson.Safe.to_channel ~suf:"\n" ic j
+
+  let write_node s =
+    let json = `Assoc [ ("kind", `String "node"); ("content", `String s) ] in
+    write_json json
+
+  let next_node =
+    let counter = ref 0 in
+    fun () ->
+      let res = !counter in
+      incr counter;
+      res
+
+  let prev_stack : int Dynarray.t = Dynarray.create ()
+  let parent_stack : int Dynarray.t = Dynarray.create ()
+  let init file_name = ic := Some (open_out file_name)
+
+  let with_parent s f =
+    let parent = next_node () in
+    Dynarray.add_last prev_stack parent;
+    Dynarray.add_last parent_stack parent;
+    let res = f () in
+    Dynarray.pop_last parent_stack |> ignore;
+    res
+
+  let close () =
+    Dynarray.clear prev_stack;
+    Dynarray.clear parent_stack;
+    match !ic with None -> () | Some ic -> close_out ic
+end

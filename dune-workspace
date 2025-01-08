@@ -1,0 +1,11 @@
+(lang dune 3.14)
+
+(context default)
+
+; (context
+;  (opam
+;   (switch bfa-flambda)
+;   (name optimised)
+;   (env
+;    (opt
+;     (ocamlopt_flags :standard -O3)))))

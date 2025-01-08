@@ -239,3 +239,26 @@ let generate_main_summary file_name =
   let pp_summary = Abductor.Summary.pp pp_err in
   let printer = Fmt.list ~sep:Fmt.sp pp_summary in
   Fmt.pr "@[<v>%a@]@." printer results
+
+let exec_fun_bi file_name fun_name =
+  match parse_ail_raw file_name with
+  | Ok (_entry_point, prog) ->
+      let () = Initialize_analysis.reinit prog in
+      let fundef =
+        match Ail_helpers.find_fun ~prog fun_name with
+        | Some fundef -> fundef
+        | None -> Fmt.failwith "Couldn't find function %s" fun_name
+      in
+      Abductor.generate_summaries ~prog fundef
+  | Error (`ParsingError s, loc) ->
+      Fmt.failwith "Failed to parse AIL at loc %a: %s" Fmt_ail.pp_loc loc s
+
+(* Entry point function *)
+
+let generate_summary_for file_name fun_name =
+  setup_console_log (Some Debug);
+  Initialize_analysis.init_once ();
+  let results = exec_fun_bi file_name fun_name in
+  let pp_summary = Abductor.Summary.pp pp_err in
+  let printer = Fmt.list ~sep:Fmt.sp pp_summary in
+  Fmt.pr "@[<v>%a@]@." printer results

@@ -44,8 +44,19 @@ module Bi_main = struct
   let cmd = Cmd.v (Cmd.info "bi-main") term
 end
 
+module Generate_summary = struct
+  let fun_name_arg =
+    let doc = "FUNCTION" in
+    Arg.(required & pos 1 (some string) None & info [] ~docv:"FUNCTION" ~doc)
+
+  let term =
+    Term.(const Bfa_c_lib.Driver.generate_summary_for $ file_arg $ fun_name_arg)
+
+  let cmd = Cmd.v (Cmd.info "gen-summary") term
+end
+
 let cmd =
   Cmd.group (Cmd.info "bfa-c")
-    [ Exec_main.cmd; Lsp.cmd; Show_ail.cmd; Bi_main.cmd ]
+    [ Exec_main.cmd; Lsp.cmd; Show_ail.cmd; Bi_main.cmd; Generate_summary.cmd ]
 
 let () = exit @@ Cmd.eval cmd

@@ -1,4 +1,3 @@
-int __nondet__();
 void *malloc(int);
 
 int main()

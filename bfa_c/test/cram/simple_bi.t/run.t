@@ -1,0 +1,1 @@
+  $ bfa-c gen-summary load.c "f"
