@@ -260,8 +260,6 @@ let rec encode_value (v : Svalue.t) =
       let v2 = encode_value_memo v2 in
       match binop with
       | Eq -> eq v1 v2
-      | Geq -> num_geq v1 v2
-      | Gt -> num_gt v1 v2
       | Leq -> num_leq v1 v2
       | Lt -> num_lt v1 v2
       | And -> bool_and v1 v2

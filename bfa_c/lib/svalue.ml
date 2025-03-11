@@ -26,8 +26,6 @@ module Binop = struct
     | Or
     (* Comparison *)
     | Eq
-    | Geq
-    | Gt
     | Leq
     | Lt
     (* Arith *)
@@ -246,20 +244,15 @@ let lift_int_binop ~out_cons ~out_ty ~f ~binop v1 v2 =
   | Int i1, Int i2 -> out_cons (f i1 i2)
   | _ -> Binop (binop, v1, v2) <| out_ty
 
-let gt v1 v2 =
-  match (v1.node.kind, v2.node.kind) with
-  | Int i1, Int i2 -> bool (Z.gt i1 i2)
-  | _, _ when equal v1 v2 -> v_false
-  | _ -> Binop (Gt, v1, v2) <| TBool
-
 let lt v1 v2 =
   match (v1.node.kind, v2.node.kind) with
   | Int i1, Int i2 -> bool (Z.lt i1 i2)
   | _, _ when equal v1 v2 -> v_false
   | _ -> Binop (Lt, v1, v2) <| TBool
 
-let geq = lift_int_binop ~out_cons:bool ~out_ty:TBool ~f:Z.geq ~binop:Geq
+let[@inline] gt v1 v2 = lt v2 v1
 let leq = lift_int_binop ~out_cons:bool ~out_ty:TBool ~f:Z.leq ~binop:Leq
+let[@inline] geq v1 v2 = leq v2 v1
 let plus = lift_int_binop ~out_cons:int_z ~out_ty:TInt ~f:Z.add ~binop:Plus
 let minus = lift_int_binop ~out_cons:int_z ~out_ty:TInt ~f:Z.sub ~binop:Minus
 let times = lift_int_binop ~out_cons:int_z ~out_ty:TInt ~f:Z.mul ~binop:Times
@@ -268,9 +261,9 @@ let div = lift_int_binop ~out_cons:int_z ~out_ty:TInt ~f:Z.div ~binop:Div
 (* Negates a boolean that is in integer form (i.e. 0 for false, anything else is true) *)
 let not_int_bool sv =
   match sv.node.kind with
-  | Int z -> int_z (if Z.equal z Z.zero then Z.one else Z.zero)
+  | Int z -> if Z.equal z Z.zero then one else zero
   | Unop (IntOfBool, sv') -> int_of_bool (not sv')
-  | _ -> int_of_bool (sem_eq sv one)
+  | _ -> int_of_bool (sem_eq sv zero)
 
 (** {2 Pointers} *)
 
