@@ -1,0 +1,68 @@
+fn fib::fib(n^1 : u32) -> u32
+{
+  v@0 : u32;
+  n^1 : u32;
+  v@2 : bool;
+  v@3 : u32;
+  v@4 : bool;
+  v@5 : u32;
+  v@6 : u32;
+  v@7 : u32;
+  v@8 : u32;
+  v@9 : u32;
+  v@10 : u32;
+  v@11 : u32;
+
+  block@0 {
+    v@3 := copy n^1;
+    v@2 := move v@3 <= (0: u32 : u32);
+    switch move v@2    [true -> block@1; false -> block@2];
+  }
+
+  block@1 {
+    storage_dead v@3;
+    v@0 := (0: u32 : u32);
+    goto block@3;
+  }
+
+  block@2 {
+    storage_dead v@3;
+    v@5 := copy n^1;
+    v@4 := move v@5 == (1: u32 : u32);
+    switch move v@4    [true -> block@4; false -> block@5];
+  }
+
+  block@3 {
+    storage_dead v@2;
+    return;
+  }
+
+  block@4 {
+    storage_dead v@5;
+    v@0 := (1: u32 : u32);
+    goto block@6;
+  }
+
+  block@5 {
+    storage_dead v@5;
+    v@8 := copy n^1;
+    v@7 := move v@8 - (1: u32 : u32);
+    storage_dead v@8;
+    v@6 := move fib::fib(move v@7);
+    storage_dead v@7;
+    v@11 := copy n^1;
+    v@10 := move v@11 - (2: u32 : u32);
+    storage_dead v@11;
+    v@9 := move fib::fib(move v@10);
+    storage_dead v@10;
+    v@0 := move v@6 + move v@9;
+    storage_dead v@9;
+    storage_dead v@6;
+    goto block@6;
+  }
+
+  block@6 {
+    storage_dead v@4;
+    goto block@3;
+  }
+}

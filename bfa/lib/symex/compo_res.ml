@@ -8,6 +8,14 @@ let pp ~ok ~err ~miss fmt = function
 let[@inline] ok x = Ok x
 let[@inline] error x = Error x
 let[@inline] miss x = Missing x
+let is_ok = function Ok _ -> true | _ -> false
+let is_error = function Error _ -> true | _ -> false
+let is_missing = function Missing _ -> true | _ -> false
+let only_oks l = List.filter_map (function Ok x -> Some x | _ -> None) l
+let only_errors l = List.filter_map (function Error x -> Some x | _ -> None) l
+
+let only_missings l =
+  List.filter_map (function Missing x -> Some x | _ -> None) l
 
 let bind x f =
   match x with Ok x -> f x | Error e -> Error e | Missing fix -> Missing fix

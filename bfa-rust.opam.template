@@ -1,0 +1,6 @@
+pin-depends: [
+  ["simple_smt.~dev" "git+https://github.com/NatKarmios/simple-smt-ocaml#9db7ef0bb61a76010de255af3cbe4066dd8dd622"]
+  ["name_matcher_parser.~dev" "git+https://github.com/N1ark/charon#f47e331b9bc770852a9bcec7d51957f296ae4f1e"]
+  ["charon.~dev" "git+https://github.com/N1ark/charon#f47e331b9bc770852a9bcec7d51957f296ae4f1e"]
+  ["visitors.~dev" "git+https://github.com/N1ark/visitors#530a469d0960ec8e68037267d52ca763a7ffedcf"]
+]

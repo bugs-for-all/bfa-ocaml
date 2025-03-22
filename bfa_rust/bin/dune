@@ -1,0 +1,5 @@
+(executable
+ (package bfa-rust)
+ (public_name bfa-rust)
+ (name bfa_rust)
+ (libraries bfa_rust_lib logs.cli))

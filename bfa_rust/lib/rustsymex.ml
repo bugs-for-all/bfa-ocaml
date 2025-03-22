@@ -1,21 +1,28 @@
 module SYMEX =
   Bfa_symex.Symex.Make_iter
     (struct
-      let steps = 150
-      let branching = 4
+      let steps = 500
+      let branching = 10
     end)
     (Z3solver)
 
 include SYMEX
 
 let check_nonzero (t : Typed.T.sint Typed.t) :
-    ([> Typed.T.nonzero ] Typed.t, [> `NonZeroIsZero ], 'fix) Result.t =
+    (Typed.T.nonzero Typed.t, [> `NonZeroIsZero ], 'fix) Result.t =
   let open Syntax in
   let open Typed.Infix in
   if%sat t ==@ Typed.zero then Result.error `NonZeroIsZero
   else Result.ok (Typed.cast t)
 
-(* sint t -> ([> nonzero ] t, [> `NonZeroIsZero ], 'fix) Csymex.Result.t *)
+let match_on ~(constr : 'a -> Typed.sbool Typed.t) (elements : 'a list) :
+    'a option t =
+  let open Syntax in
+  let rec aux = function
+    | e :: rest -> if%sat constr e then return (Some e) else aux rest
+    | [] -> return None
+  in
+  aux elements
 
 let ( let@ ) = ( @@ )
 
@@ -29,33 +36,10 @@ let push_give_up, flush_give_up =
   in
   (push_give_up, flush_give_up)
 
-let unsupported_file = ref None
-
-let dump_unsupported () =
-  match !unsupported_file with
-  | None -> ()
-  | Some file ->
-      let reasons = flush_give_up () in
-      let module M = Map.Make (String) in
-      let map =
-        List.fold_left
-          (fun map (reason, _loc) ->
-            M.update reason
-              (function None -> Some 1 | Some k -> Some (k + 1))
-              map)
-          M.empty reasons
-      in
-      let oc = open_out file in
-      let json : Yojson.Safe.t =
-        `Assoc (List.map (fun (k, v) -> (k, `Int v)) (M.bindings map))
-      in
-      Yojson.Safe.to_channel oc json;
-      close_out oc
-
-let current_loc = ref Cerb_location.unknown
+let current_loc = ref Charon_util.empty_span
 let get_loc () = !current_loc
 
-let with_loc ~(loc : Cerb_location.t) f =
+let with_loc ~(loc : Charon.Meta.span) f =
   let open Syntax in
   let old_loc = !current_loc in
   current_loc := loc;
@@ -70,9 +54,13 @@ let with_loc_immediate ~loc f =
   current_loc := old_loc;
   res
 
+let not_impl_happened = ref None
+
 let not_impl msg =
+  if !not_impl_happened = None then not_impl_happened := Some msg;
   let msg = "MISSING FEATURE, VANISHING: " ^ msg in
   L.info (fun m -> m "%s" msg);
+  print_endline msg;
   push_give_up (msg, get_loc ());
   vanish ()
 

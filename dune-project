@@ -8,9 +8,13 @@
 
 (license BSD-3-Clause)
 
-(authors "Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>")
+(authors
+ "Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>"
+ "Opale Sjöstedt <opale.sjostedt23@imperial.ac.uk>")
 
-(maintainers "Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>")
+(maintainers
+ "Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>"
+ "Opale Sjöstedt <opale.sjostedt23@imperial.ac.uk>")
 
 (source
  (github bugs-for-all/bfa))
@@ -104,3 +108,39 @@
   vscode
   vscode-interop
   vscode-node))
+
+(package
+ (name bfa-rust)
+ (synopsis "Bugs for All, for Rust.")
+ (description "Bugs for All, for Rust.")
+ (depends
+  (ocaml
+   (>= 5.3.0))
+  (shexp :build)
+  eio_main
+  bfa
+  zarith
+  ppx_deriving
+  hashcons
+  cmdliner
+  fmt
+  logs
+  printbox-text
+  unionFind
+  name_matcher_parser
+  charon
+  (linol
+   (>= 0.8))
+  (linol-eio
+   (>= 0.8))
+  (odoc :with-doc)
+  (alcotest :with-test)
+  (dune
+   (and
+    :build
+    (>= 3.14.0)))
+  (ocamlformat
+   (and
+    :with-dev-detup
+    (= 0.27.0)))
+  (ocaml-lsp-server :with-dev-setup)))

@@ -1,0 +1,7 @@
+[package]
+name = "test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kani = "0.0.1"

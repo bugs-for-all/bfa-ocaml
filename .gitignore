@@ -179,6 +179,10 @@ setup.log
 # Local OPAM switch
 _opam/
 
+# LLBC generated files by Charon, debug file
+*.llbc.json
+*.crate
+
 ### macOS ###
 # General
 .DS_Store
@@ -211,6 +215,11 @@ Temporary Items
 ### macOS Patch ###
 # iCloud generated files
 *.icloud
+
+### Rust ###
+Cargo.lock
+target/
+
 
 # Created using: https://www.toptal.com/developers/gitignore/api/node,ocaml
 # and modified by hand afterwards

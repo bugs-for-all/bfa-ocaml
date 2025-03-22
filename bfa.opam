@@ -2,8 +2,14 @@
 opam-version: "2.0"
 synopsis: "Bugs for All!"
 description: "Bugs for All!"
-maintainer: ["Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>"]
-authors: ["Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>"]
+maintainer: [
+  "Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>"
+  "Opale Sjöstedt <opale.sjostedt23@imperial.ac.uk>"
+]
+authors: [
+  "Sacha-Élie Ayoun <s.ayoun17@imperial.ac.uk>"
+  "Opale Sjöstedt <opale.sjostedt23@imperial.ac.uk>"
+]
 license: "BSD-3-Clause"
 homepage: "https://github.com/bugs-for-all/bfa"
 bug-reports: "https://github.com/bugs-for-all/bfa/issues"

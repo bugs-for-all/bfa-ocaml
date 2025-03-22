@@ -1,0 +1,7 @@
+[package]
+name = "kani"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kani_macros = { path = "../kani_macros" }

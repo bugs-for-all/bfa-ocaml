@@ -1,0 +1,27 @@
+(include_subdirs qualified)
+
+(library
+ (package bfa-rust)
+ (name bfa_rust_lib)
+ (libraries
+  bfa.std
+  bfa.bfa_symex
+  cmdliner
+  fmt
+  logs
+  logs.fmt
+  fmt.tty
+  iter
+  zarith
+  hashcons
+  simple_smt
+  linol
+  linol-eio
+  eio_main
+  printbox-text
+  charon)
+ (flags :standard -open Bfa_std)
+ (preprocess
+  (pps ppx_deriving.std ppx_symex))
+ (instrumentation
+  (backend landmarks --auto)))
