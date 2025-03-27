@@ -47,8 +47,8 @@ let executable ?(args = []) installed_path =
     (name, path)
   in
   let cerb_runtime =
-    let name = "CERB_RUNTIME" in
-    let path = installed_path / "share" / "cerb_runtime" in
+    let name = "CERB_INSTALL_PREFIX" in
+    let path = installed_path in
     (name, path)
   in
   let command = installed_path / "bin" / "bfa-c" in

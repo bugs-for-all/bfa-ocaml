@@ -73,7 +73,7 @@ module Frontend = struct
   let includes = ref ""
   let add_include s = includes := !includes ^ "-I " ^ s ^ " "
   let add_includes ss = List.iter add_include ss
-  let libc () = Filename.concat (Cerb_runtime.runtime ()) "libc/include "
+  let libc () = Cerb_runtime.in_runtime "libc/include "
 
   let init () =
     let result =
@@ -94,6 +94,7 @@ module Frontend = struct
           sequentialise_core = false;
           cpp_cmd;
           cpp_stderr = false;
+          cpp_save = None;
         }
       in
       set_cerb_conf ();

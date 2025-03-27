@@ -60,7 +60,6 @@
   eio_main
   bfa
   cerberus-lib
-  cerberus
   zarith
   ppx_deriving
   hashcons

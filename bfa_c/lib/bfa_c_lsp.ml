@@ -1,7 +1,7 @@
 let cerb_loc_to_range loc =
   let open Lsp.Types in
   let (start_l, start_c), (end_l, end_c) =
-    Option.value ~default:((0, 0), (0, 0)) (Cerb_location.to_cartesian loc)
+    Option.value ~default:((0, 0), (0, 0)) (Cerb_location.to_cartesian_user loc)
   in
   Range.
     {

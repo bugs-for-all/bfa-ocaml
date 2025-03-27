@@ -7,7 +7,7 @@
     ],
     "env": {
       "BFA_Z3_PATH": "/opt/homebrew/bin/z3",
-      "CERB_RUNTIME": "../../../_opam/lib/cerberus/runtime/"
+      "OPAM_SWITCH_PREFIX": "../../../_opam"
     }
   },
   "bfa.server.debug": true,

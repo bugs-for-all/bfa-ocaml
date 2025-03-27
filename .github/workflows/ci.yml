@@ -69,6 +69,8 @@ jobs:
           chmod +x ./bin/z3
       - name: Write dummy C file
         run: echo "int main() { return 12; }" > test.c
-      - run: DYLD_LIBRARY_PATH=./lib:$DYLD_LIBRARY_PATH CERB_RUNTIME=./share/cerb_runtime  ./bin/bfa-c exec-main test.c
+      - run: DYLD_LIBRARY_PATH=./lib:$DYLD_LIBRARY_PATH ./bin/bfa-c exec-main test.c
         env:
           BFA_Z3_PATH: ./bin/z3
+          CERB_INSTALL_PREFIX: .
+
