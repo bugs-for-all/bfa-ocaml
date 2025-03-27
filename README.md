@@ -25,3 +25,14 @@ BFA-C is an automatic in-IDE bug finder for C programs. It is in heavy developme
 
 It can currently be tested on standalone files by opening this project in VSCode.
 To do so, open the `Run and Debug` tab of the sidebar, select the "Launch (Local)" configuration and click the "play" button.
+
+# Rusteria (bfa-rust)
+
+BFA-Rust is a Kani-like symbolic execution engine for Rust. It is in heavy development.
+
+It can run standalone files, symbolically executing the `main` function, or any function with the attribute `#{kani::proof}`. To run it, you must first export the environment variable `KANI_LIB_PATH` to `path/to/bfa-ocaml/bfa_rust/kani_lib`. You must also have [Charon](https://github.com/AeneasVerif/charon) built and on your path -- to do so, clone Charon and run `make build-dev-charon-rust`. Once this is done, simply run:
+```sh
+bfa-rust exec-main <file>
+```
+
+To test Rusteria on the Kani test suite, clone [Kani](https://github.com/model-checking/kani) next to `bfa-ocaml`, and run `bfa_rust/scripts/kani.sh`. Run `bfa_rust/scripts/kani.sh --help` to see all available arguments.
