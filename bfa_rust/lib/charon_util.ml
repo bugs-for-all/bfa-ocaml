@@ -1,16 +1,16 @@
 open Charon
 open Typed
 
-type rust_val =
+type 'ptr rust_val =
   | Base of T.cval Typed.t
-  | Ptr of T.sptr Typed.t
-  | FatPtr of T.sptr Typed.t * T.cval Typed.t  (** ptr * metadata *)
-  | Enum of T.cval Typed.t * rust_val list  (** discriminant * values *)
-  | Struct of rust_val list  (** contains ordered fields *)
-  | Tuple of rust_val list
-  | Array of rust_val list
+  | Ptr of 'ptr  (** pointer, parametric to enable Ruxt *)
+  | Enum of T.cval Typed.t * 'ptr rust_val list  (** discriminant * values *)
+  | Struct of 'ptr rust_val list  (** contains ordered fields *)
+  | Tuple of 'ptr rust_val list
+  | Array of 'ptr rust_val list
 [@@deriving show { with_path = false }]
 
+let ppa_rust_val ft rv = pp_rust_val (Fmt.any "?") ft rv
 let unit_ = Tuple []
 
 let value_of_scalar : Values.scalar_value -> T.cval Typed.t = function
@@ -42,17 +42,9 @@ let lit_to_string : Values.literal_type -> string = function
 
 let as_ptr = function
   | Ptr ptr -> ptr
-  | FatPtr (ptr, _) -> ptr
   | v ->
       Fmt.failwith "Unexpected rust_val kind, expected a pointer, got: %a"
-        pp_rust_val v
-
-let as_ptr_meta_opt = function
-  | Ptr _ -> None
-  | FatPtr (_, meta) -> Some meta
-  | v ->
-      Fmt.failwith "Unexpected rust_val kind, expected a pointer, got: %a"
-        pp_rust_val v
+        ppa_rust_val v
 
 let as_base_of ~ty = function
   | Base v -> (
@@ -63,7 +55,7 @@ let as_base_of ~ty = function
             Typed.ppa_ty ty Typed.ppa v)
   | v ->
       Fmt.failwith "Unexpected rust_val kind, expected a base value got: %a"
-        pp_rust_val v
+        ppa_rust_val v
 
 let int_of_const_generic : Types.const_generic -> int = function
   | CgValue (VScalar v) -> Z.to_int v.value

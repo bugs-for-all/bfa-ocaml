@@ -2,25 +2,27 @@ open Typed
 open T
 
 module type S = sig
+  module Sptr : Sptr.S
+
+  (* state *)
   type t
   type serialized
   type 'a err
 
   val add_to_call_trace : 'a err -> Call_trace.element -> 'a err
-  val pp : Format.formatter -> t -> unit
+  val pp : t Fmt.t
 
   (** Prettier but expensive printing. *)
-  val pp_pretty : ignore_freed:bool -> Format.formatter -> t -> unit
+  val pp_pretty : ignore_freed:bool -> t Fmt.t
 
   val empty : t
 
   val load :
     ?is_move:bool ->
-    ?meta:[< cval ] Typed.t ->
-    [< sptr ] Typed.t ->
+    Sptr.t ->
     Charon.Types.ty ->
     t ->
-    ( Charon_util.rust_val * t,
+    ( Sptr.t Charon_util.rust_val * t,
       [> `NullDereference
       | `OutOfBounds
       | `UninitializedMemoryAccess
@@ -31,9 +33,9 @@ module type S = sig
     Rustsymex.Result.t
 
   val store :
-    [< sptr ] Typed.t ->
+    Sptr.t ->
     Charon.Types.ty ->
-    Charon_util.rust_val ->
+    Sptr.t Charon_util.rust_val ->
     t ->
     ( unit * t,
       [> `NullDereference | `OutOfBounds | `UseAfterFree ] err,
@@ -43,15 +45,15 @@ module type S = sig
   val alloc :
     sint Typed.t ->
     t ->
-    ([> sptr ] Typed.t * t, [> ] err, serialized list) Rustsymex.Result.t
+    (Sptr.t * t, [> ] err, serialized list) Rustsymex.Result.t
 
   val alloc_ty :
     Charon.Types.ty ->
     t ->
-    ([> sptr ] Typed.t * t, [> ] err, serialized list) Rustsymex.Result.t
+    (Sptr.t * t, [> ] err, serialized list) Rustsymex.Result.t
 
   val free :
-    [< sptr ] Typed.t ->
+    Sptr.t ->
     t ->
     ( unit * t,
       [> `InvalidFree | `UseAfterFree ] err,
@@ -59,7 +61,7 @@ module type S = sig
     Rustsymex.Result.t
 
   val uninit :
-    [< sptr ] Typed.t ->
+    Sptr.t ->
     Charon.Types.ty ->
     t ->
     ( unit * t,
@@ -68,8 +70,8 @@ module type S = sig
     Rustsymex.Result.t
 
   val copy_nonoverlapping :
-    dst:[< sptr ] Typed.t ->
-    src:[< sptr ] Typed.t ->
+    dst:Sptr.t ->
+    src:Sptr.t ->
     size:sint Typed.t ->
     t ->
     ( unit * t,
@@ -85,29 +87,23 @@ module type S = sig
 
   val store_str_global :
     string ->
-    Charon_util.rust_val ->
+    Sptr.t ->
     t ->
     (unit * t, [> ] err, serialized list) Rustsymex.Result.t
 
   val store_global :
     Charon.Types.global_decl_id ->
-    Charon_util.rust_val ->
+    Sptr.t ->
     t ->
     (unit * t, [> ] err, serialized list) Rustsymex.Result.t
 
   val load_str_global :
     string ->
     t ->
-    ( Charon_util.rust_val option * t,
-      [> ] err,
-      serialized list )
-    Rustsymex.Result.t
+    (Sptr.t option * t, [> ] err, serialized list) Rustsymex.Result.t
 
   val load_global :
     Charon.Types.global_decl_id ->
     t ->
-    ( Charon_util.rust_val option * t,
-      [> ] err,
-      serialized list )
-    Rustsymex.Result.t
+    (Sptr.t option * t, [> ] err, serialized list) Rustsymex.Result.t
 end

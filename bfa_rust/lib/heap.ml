@@ -3,6 +3,7 @@ open Typed.Infix
 open Typed.Syntax
 module T = Typed.T
 open Rustsymex
+module Sptr = Sptr.ArithPtr
 
 type 'a err = 'a * Call_trace.t
 
@@ -41,7 +42,7 @@ end
 
 type t = {
   heap : Tree_block.t Freeable.t SPmap.t option;
-  globals : Charon_util.rust_val GlobMap.t;
+  globals : Sptr.t GlobMap.t;
 }
 [@@deriving show { with_path = false }]
 
@@ -79,11 +80,11 @@ let empty = { heap = None; globals = GlobMap.empty }
 let log action ptr st =
   L.debug (fun m ->
       m "About to execute action: %s at %a (%a)@\n@[<2>HEAP:@ %a@]" action
-        Typed.ppa ptr Call_trace.pp_span (get_loc ())
+        Sptr.pp ptr Call_trace.pp_span (get_loc ())
         (pp_pretty ~ignore_freed:true)
         st)
 
-let with_ptr (ptr : [< T.sptr ] Typed.t) ({ heap; _ } as st : t)
+let with_ptr ((ptr, _) : Sptr.t) ({ heap; _ } as st : t)
     (f :
       ofs:[< T.sint ] Typed.t ->
       Tree_block.t option ->
@@ -93,7 +94,7 @@ let with_ptr (ptr : [< T.sptr ] Typed.t) ({ heap; _ } as st : t)
   let++ v, heap = (SPmap.wrap (Freeable.wrap (f ~ofs))) loc heap in
   (v, { st with heap })
 
-let with_ptr_read_only (ptr : [< T.sptr ] Typed.t) ({ heap; _ } : t)
+let with_ptr_read_only ((ptr, _) : Sptr.t) ({ heap; _ } : t)
     (f :
       ofs:[< T.sint ] Typed.t ->
       Tree_block.t option ->
@@ -102,15 +103,15 @@ let with_ptr_read_only (ptr : [< T.sptr ] Typed.t) ({ heap; _ } : t)
   let loc, ofs = Typed.Ptr.decompose ptr in
   (SPmap.wrap_read_only (Freeable.wrap_read_only (f ~ofs))) loc heap
 
-let load ?is_move ?meta ptr ty st =
+let load ?is_move ((_, meta) as ptr) ty st =
   let@ () = with_error_loc_as_call_trace () in
   let@ () = with_loc_err () in
   log "load" ptr st;
-  if%sat Typed.Ptr.is_at_null_loc ptr then Result.error `NullDereference
+  if%sat Sptr.is_null ptr then Result.error `NullDereference
   else
     with_ptr ptr st (fun ~ofs block ->
         L.debug (fun f ->
-            f "Recursively reading from block tree at %a:@.%a" Typed.ppa ptr
+            f "Recursively reading from block tree at %a:@.%a" Sptr.pp ptr
               Fmt.(option ~none:(any "None") Tree_block.pp)
               block);
         let rec aux block = function
@@ -135,21 +136,23 @@ let load ?is_move ?meta ptr ty st =
               let* res = callback values in
               aux block res
         in
-        let parser = Layout.rust_of_cvals ~offset:ofs ?meta ty in
+        let parser = Encoder.rust_of_cvals ~offset:ofs ?meta ty in
         let++ value, block = aux block parser in
         L.debug (fun f ->
-            f "Finished reading rust value %a" Charon_util.pp_rust_val value);
+            f "Finished reading rust value %a"
+              (Charon_util.pp_rust_val Sptr.pp)
+              value);
         (value, block))
 
 let store ptr ty sval st =
   let@ () = with_error_loc_as_call_trace () in
   let@ () = with_loc_err () in
   log "store" ptr st;
-  if%sat Typed.Ptr.is_at_null_loc ptr then Result.error `NullDereference
+  if%sat Sptr.is_null ptr then Result.error `NullDereference
   else
     with_ptr ptr st (fun ~ofs block ->
-        let parts = Layout.rust_to_cvals ~offset:ofs sval ty in
-        let pp_quad f ({ value; ty; size; offset } : Layout.cval_info) =
+        let parts = Encoder.rust_to_cvals ~offset:ofs sval ty in
+        let pp_quad f ({ value; ty; size; offset } : Encoder.cval_info) =
           Fmt.pf f "%a: %s [%a, +%a[" Typed.ppa value
             (Charon_util.lit_to_string ty)
             Typed.ppa offset Typed.ppa size
@@ -164,7 +167,7 @@ let copy_nonoverlapping ~dst ~src ~size st =
   let open Typed.Infix in
   let@ () = with_error_loc_as_call_trace () in
   let@ () = with_loc_err () in
-  if%sat Typed.Ptr.is_at_null_loc dst ||@ Typed.Ptr.is_at_null_loc src then
+  if%sat Sptr.is_null dst ||@ Sptr.is_null src then
     Result.error `NullDereference
   else
     let** tree_to_write =
@@ -182,6 +185,7 @@ let alloc size ({ heap; _ } as st) =
   let block = Freeable.Alive (Tree_block.alloc size) in
   let** loc, heap = SPmap.alloc ~new_codom:block heap in
   let ptr = Typed.Ptr.mk loc 0s in
+  let ptr = (ptr, None) in
   (* The pointer is necessarily not null *)
   let+ () = assume [ Typed.(not (loc ==@ Ptr.null_loc)) ] in
   Bfa_symex.Compo_res.ok (ptr, { st with heap })
@@ -190,7 +194,7 @@ let alloc_ty ty st =
   let* size = Layout.size_of_s ty in
   alloc size st
 
-let free (ptr : [< T.sptr ] Typed.t) ({ heap; _ } as st : t) :
+let free ((ptr, _) : Sptr.t) ({ heap; _ } as st : t) :
     (unit * t, 'err, serialized list) Result.t =
   let@ () = with_error_loc_as_call_trace () in
   if%sat Typed.Ptr.ofs ptr ==@ 0s then
@@ -209,7 +213,7 @@ let uninit ptr ty st =
   let@ () = with_loc_err () in
   log "uninit" ptr st;
   let* size = Layout.size_of_s ty in
-  if%sat Typed.Ptr.is_at_null_loc ptr then Result.error `NullDereference
+  if%sat Sptr.is_null ptr then Result.error `NullDereference
   else
     with_ptr ptr st (fun ~ofs block -> Tree_block.uninit_range ofs size block)
 
@@ -234,18 +238,18 @@ let consume (serialized : serialized) ({ heap; _ } as st : t) :
   in
   { st with heap }
 
-let store_str_global str v ({ globals; _ } as st) =
-  let globals = GlobMap.add (String str) v globals in
+let store_str_global str ptr ({ globals; _ } as st) =
+  let globals = GlobMap.add (String str) ptr globals in
   Result.ok ((), { st with globals })
 
-let store_global g v ({ globals; _ } as st) =
-  let globals = GlobMap.add (Global g) v globals in
+let store_global g ptr ({ globals; _ } as st) =
+  let globals = GlobMap.add (Global g) ptr globals in
   Result.ok ((), { st with globals })
 
 let load_str_global str ({ globals; _ } as st) =
-  let v = GlobMap.find_opt (String str) globals in
-  Result.ok (v, st)
+  let ptr = GlobMap.find_opt (String str) globals in
+  Result.ok (ptr, st)
 
 let load_global g ({ globals; _ } as st) =
-  let v = GlobMap.find_opt (Global g) globals in
-  Result.ok (v, st)
+  let ptr = GlobMap.find_opt (Global g) globals in
+  Result.ok (ptr, st)

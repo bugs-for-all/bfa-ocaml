@@ -9,11 +9,14 @@ module T = Typed.T
 
 module Make (Heap : Heap_intf.S) = struct
   module Std_funs = Std_funs.M (Heap)
+  module Sptr = Heap.Sptr
+
+  let pp_rust_val = pp_rust_val Sptr.pp
 
   exception Unsupported of (string * Meta.span)
 
   type state = Heap.t
-  type store = (T.sptr Typed.t option * Types.ty) Store.t
+  type store = (Sptr.t option * Types.ty) Store.t
 
   let cast_checked ~ty x =
     match Typed.cast_checked x ty with
@@ -24,9 +27,9 @@ module Make (Heap : Heap_intf.S) = struct
 
   type 'err fun_exec =
     crate:UllbcAst.crate ->
-    args:rust_val list ->
+    args:Sptr.t rust_val list ->
     state:state ->
-    (rust_val * state, 'err, Heap.serialized list) Result.t
+    (Sptr.t rust_val * state, 'err, Heap.serialized list) Result.t
 
   let alloc_stack (locals : GAst.locals) args st =
     if List.compare_length_with args locals.arg_count <> 0 then
@@ -52,7 +55,7 @@ module Make (Heap : Heap_intf.S) = struct
             let++ (), st = Heap.free ptr st in
             st
         | Some ptr, Some protect ->
-            if%sat ptr ==@ protect then Result.ok st
+            if%sat Sptr.eq ptr protect then Result.ok st
             else
               let++ (), st = Heap.free ptr st in
               st)
@@ -67,7 +70,7 @@ module Make (Heap : Heap_intf.S) = struct
     | CLiteral (VStr str) -> (
         let** ptr_opt, state = Heap.load_str_global str state in
         match ptr_opt with
-        | Some v -> Result.ok (v, state)
+        | Some v -> Result.ok (Ptr v, state)
         | None ->
             (* We "cheat" and model strings as an array of chars, with &str a slice *)
             let len = String.length str in
@@ -82,9 +85,9 @@ module Make (Heap : Heap_intf.S) = struct
             let str_ty : Types.ty = mk_array_ty (TLiteral TChar) len in
             let** ptr, state = Heap.alloc_ty str_ty state in
             let** (), state = Heap.store ptr str_ty char_arr state in
-            let value = FatPtr (ptr, Typed.int len) in
+            let value = Sptr.with_meta ~meta:(Typed.int len) ptr in
             let++ (), state = Heap.store_str_global str value state in
-            (value, state))
+            (Ptr value, state))
     | e ->
         Fmt.kstr not_impl "TODO: resolve_constant %a"
           Expressions.pp_raw_constant_expr e
@@ -101,9 +104,9 @@ module Make (Heap : Heap_intf.S) = struct
         match ptr with
         | Some ptr ->
             L.debug (fun f ->
-                f "Found pointer %a of variable %a" Typed.ppa ptr
+                f "Found pointer %a of variable %a" Sptr.pp ptr
                   Expressions.pp_var_id var);
-            Result.ok (Ptr ptr, state)
+            Result.ok (ptr, state)
         | None ->
             Fmt.kstr not_impl "Variable %a not found in store"
               Expressions.pp_var_id var)
@@ -111,37 +114,25 @@ module Make (Heap : Heap_intf.S) = struct
     | PlaceProjection (base, Deref) ->
         let** ptr, state = resolve_place ~store state base in
         L.debug (fun f ->
-            f "Dereferencing ptr %a of %a" pp_rust_val ptr Types.pp_ty base.ty);
-        let ptr_raw = as_ptr ptr in
-        let** v, state = Heap.load ptr_raw base.ty state in
+            f "Dereferencing ptr %a of %a" Sptr.pp ptr Types.pp_ty base.ty);
+        let** v, state = Heap.load ptr base.ty state in
+        let v = as_ptr v in
         L.debug (fun f ->
-            f "Dereferenced pointer %a to pointer %a" pp_rust_val ptr
-              pp_rust_val v);
+            f "Dereferenced pointer %a to pointer %a" Sptr.pp ptr Sptr.pp v);
         Result.ok (v, state)
     | PlaceProjection (base, Field (kind, field)) ->
         let** ptr, state = resolve_place ~store state base in
         L.debug (fun f ->
             f "Projecting field %a (kind %a) for %a" Types.pp_field_id field
-              Expressions.pp_field_proj_kind kind pp_rust_val ptr);
-        let ptr = as_ptr ptr in
-        let field = Types.FieldId.to_int field in
-        let layout, field =
-          match kind with
-          | ProjAdt (adt_id, Some variant) ->
-              (* Skip discriminator, so field + 1 *)
-              (Layout.of_enum_variant adt_id variant, field + 1)
-          | ProjAdt (adt_id, None) -> (Layout.of_adt_id adt_id, field)
-          | ProjTuple _arity -> (Layout.layout_of base.ty, field)
-        in
-        let offset = Array.get layout.members_ofs field in
-        let ptr = Typed.Ptr.add_ofs ptr (Typed.int offset) in
+              Expressions.pp_field_proj_kind kind Sptr.pp ptr);
+        let ptr' = Sptr.project base.ty kind field ptr in
         L.debug (fun f ->
             f
-              "Dereferenced ADT projection %a, field %d, with pointer %a to \
+              "Dereferenced ADT projection %a, field %a, with pointer %a to \
                pointer %a"
-              Expressions.pp_field_proj_kind kind field Typed.ppa ptr Typed.ppa
-              ptr);
-        Result.ok (Ptr ptr, state)
+              Expressions.pp_field_proj_kind kind Types.pp_field_id field
+              Sptr.pp ptr Sptr.pp ptr');
+        Result.ok (ptr', state)
 
   let rec equality_check ~state (v1 : [< Typed.T.cval ] Typed.t)
       (v2 : [< Typed.T.cval ] Typed.t) =
@@ -205,7 +196,6 @@ module Make (Heap : Heap_intf.S) = struct
         in
         let** ptr, state = Heap.alloc_ty decl.ty state in
         let** (), state = Heap.store ptr decl.ty v state in
-        let ptr = Ptr ptr in
         let++ (), state = Heap.store_global g ptr state in
         (ptr, state)
 
@@ -216,11 +206,9 @@ module Make (Heap : Heap_intf.S) = struct
         (v, state)
     | Move loc | Copy loc ->
         let ty = loc.ty in
-        let** rptr, state = resolve_place ~store state loc in
-        let loc = as_ptr rptr in
-        let meta = as_ptr_meta_opt rptr in
+        let** ptr, state = resolve_place ~store state loc in
         let is_move = match op with Move _ -> true | _ -> false in
-        let++ v, state = Heap.load ~is_move ?meta loc ty state in
+        let++ v, state = Heap.load ~is_move ptr ty state in
         (v, state)
 
   and eval_operand_list ~crate ~store state ops =
@@ -235,17 +223,19 @@ module Make (Heap : Heap_intf.S) = struct
     let eval_operand = eval_operand ~crate ~store in
     match expr with
     | Use op -> eval_operand state op
-    | RvRef (place, _borrow) -> resolve_place ~store state place
+    | RvRef (place, _borrow) ->
+        let++ ptr, state = resolve_place ~store state place in
+        (Ptr ptr, state)
     | Global { global_id; _ } ->
         let decl =
           UllbcAst.GlobalDeclId.Map.find global_id UllbcAst.(crate.global_decls)
         in
         let** ptr, state = resolve_global ~crate global_id state in
-        let ptr = as_ptr ptr in
         Heap.load ptr decl.ty state
     | GlobalRef ({ global_id; _ }, _mut) ->
         (* TODO: handle mutability *)
-        resolve_global ~crate global_id state
+        let++ ptr, state = resolve_global ~crate global_id state in
+        (Ptr ptr, state)
     | UnaryOp (op, e) -> (
         let** v, _state = eval_operand state e in
         match op with
@@ -309,7 +299,8 @@ module Make (Heap : Heap_intf.S) = struct
                )) ->
             let ptr = as_ptr v in
             let size = Typed.int @@ int_of_const_generic size in
-            Result.ok (FatPtr (ptr, size), state)
+            let ptr = Sptr.with_meta ~meta:size ptr in
+            Result.ok (Ptr ptr, state)
         | Cast kind ->
             Fmt.kstr not_impl "Unsupported cast kind: %a"
               Expressions.pp_cast_kind kind)
@@ -391,7 +382,6 @@ module Make (Heap : Heap_intf.S) = struct
               Expressions.pp_nullop op)
     | Discriminant (place, kind) ->
         let** loc, state = resolve_place ~store state place in
-        let loc = as_ptr loc in
         let enum = Types.TypeDeclId.Map.find kind UllbcAst.(crate.type_decls) in
         let* discr_ofs, discr_ty =
           match enum.kind with
@@ -406,7 +396,7 @@ module Make (Heap : Heap_intf.S) = struct
               Fmt.failwith "Expected an enum for discriminant, got %a"
                 Types.pp_type_decl_kind k
         in
-        let loc = Typed.Ptr.add_ofs loc discr_ofs in
+        let loc = Sptr.offset loc discr_ofs in
         Heap.load loc discr_ty state
     (* Enum aggregate *)
     | Aggregate (AggregatedAdt (TAdtId t_id, Some v_id, None, _), vals) ->
@@ -448,14 +438,14 @@ module Make (Heap : Heap_intf.S) = struct
     (* Raw pointer *)
     | RawPtr (place, _kind) ->
         let++ ptr, state = resolve_place ~store state place in
-        (ptr, state)
+        (Ptr ptr, state)
     (* Length of a &[T;N] or &[T] *)
     | Len (place, _, size_opt) ->
         let** ptr, state = resolve_place ~store state place in
         let+ len =
-          match (ptr, size_opt) with
-          | Ptr _, Some size -> return (Typed.int @@ int_of_const_generic size)
-          | FatPtr (_, len), None -> return len
+          match (Sptr.meta ptr, size_opt) with
+          | _, Some size -> return (Typed.int @@ int_of_const_generic size)
+          | Some len, None -> return len
           | _ -> not_impl "Unexpected len rvalue"
         in
         Bfa_symex.Compo_res.Ok (Base len, state)
@@ -486,9 +476,8 @@ module Make (Heap : Heap_intf.S) = struct
         (store, state) *)
     | Assign (({ ty; _ } as place), rval) ->
         let** ptr, state = resolve_place ~store state place in
-        let ptr = as_ptr ptr in
         let** v, state = eval_rvalue ~crate ~store state rval in
-        L.info (fun m -> m "Assigning %a <- %a" Typed.ppa ptr pp_rust_val v);
+        L.info (fun m -> m "Assigning %a <- %a" Sptr.pp ptr pp_rust_val v);
         let++ (), state = Heap.store ptr ty v state in
         (store, state)
     | Call { func; args; dest = { ty; _ } as place } ->
@@ -504,7 +493,6 @@ module Make (Heap : Heap_intf.S) = struct
             (Call_trace.make_element ~loc ~msg:"Call trace" ())
         in
         let** ptr, state = resolve_place ~store state place in
-        let ptr = as_ptr ptr in
         L.info (fun m ->
             let ctx = PrintUllbcAst.Crate.crate_to_fmt_env crate in
             m "Returned %a from %s" pp_rust_val v
@@ -533,7 +521,6 @@ module Make (Heap : Heap_intf.S) = struct
     | Drop place ->
         (* TODO: this is probably super wrong, drop glue etc. *)
         let** place_ptr, state = resolve_place ~store state place in
-        let place_ptr = as_ptr place_ptr in
         let++ (), state = Heap.uninit place_ptr place.ty state in
         (store, state)
     | Assert { cond; expected } ->
@@ -647,9 +634,7 @@ module Make (Heap : Heap_intf.S) = struct
     in
     let protected_address =
       match (fundef.signature.output, value) with
-      | TRef (RStatic, _, RShared), Ptr addr
-      | TRef (RStatic, _, RShared), FatPtr (addr, _) ->
-          Some addr
+      | TRef (RStatic, _, RShared), Ptr addr -> Some addr
       | _ -> None
     in
     let++ state = dealloc_store ?protected_address store state in
