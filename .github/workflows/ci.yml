@@ -36,10 +36,10 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
       - name: Install dune
-        run: |
-          curl -fsSL https://get.dune.build/install | sh
-          source ~/.bashrc
+        run: curl -fsSL https://get.dune.build/install | sh
       # OCaml build and tests
+      - name: Add dune to path
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: lock
         run: dune pkg lock
       - name: OCaml build
