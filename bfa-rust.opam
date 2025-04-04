@@ -28,8 +28,6 @@ depends: [
   "unionFind"
   "name_matcher_parser"
   "charon"
-  "linol" {>= "0.8"}
-  "linol-eio" {>= "0.8"}
   "odoc" {with-doc}
   "alcotest" {with-test}
   "dune" {>= "3.14" & build & >= "3.14.0"}
