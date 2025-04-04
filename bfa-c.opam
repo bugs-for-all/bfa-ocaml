@@ -26,8 +26,8 @@ depends: [
   "fmt"
   "logs"
   "printbox-text"
-  "linol" {>= "0.8"}
-  "linol-eio" {>= "0.8"}
+  "linol"
+  "linol-eio"
   "odoc" {with-doc}
   "alcotest" {with-test}
   "dune" {>= "3.14" & build & >= "3.14.0"}
@@ -52,4 +52,6 @@ dev-repo: "git+https://github.com/bugs-for-all/bfa.git"
 pin-depends: [
   ["simple_smt.~dev" "git+https://github.com/NatKarmios/simple-smt-ocaml#9db7ef0bb61a76010de255af3cbe4066dd8dd622"]
   ["cerberus-lib.~dev" "git+https://github.com/giltho/cerberus#482e660d59c951c0bd9a0c89c0f890ad00a078c2"]
+  ["linol.~dev" "git+https://github.com/giltho/linol#aae7605aff26d1a5c64f3aa4e46d2a447f5c74eb"]
+  ["linol-eio.~dev" "git+https://github.com/giltho/linol#aae7605aff26d1a5c64f3aa4e46d2a447f5c74eb"]
 ]
