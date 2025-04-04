@@ -35,25 +35,15 @@ jobs:
           echo "$PWD/bin" >> $GITHUB_PATH
       - name: Setup node
         uses: actions/setup-node@v4
-      - name: Setup OCaml
-        uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: 5.3.0
-          dune-cache: true
-      - name: Restore opam cache
-        uses: actions/cache@v4
-        with:
-          path: _opam
-          key: ${{ runner.os }}-${{ runner.arch }}-opam-${{ hashFiles('*.opam') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-opam-
+      - name: Install dune
+        run: curl -fsSL https://get.dune.build/install | sh
       # OCaml build and tests
-      - name: setup dependencies
-        run: make ocaml-deps
-      - name: Build OCaml stuff
-        run: make ocaml
-      - name: test
-        run: Make ocaml-test
+      - name: lock
+        run: dune pkg lock
+      - name: OCaml build
+        run: dune build
+      - name: OCaml test
+        run: dune test
       # Building js stuff
       - name: Install JS dependencies
         run: yarn install
