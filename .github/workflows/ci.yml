@@ -25,7 +25,9 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
       - name: Install dune
-        run: curl -fsSL https://get.dune.build/install | sh
+        run: |
+          curl -fsSL https://get.dune.build/install | sh
+          source ~/.bashrc
       # OCaml build and tests
       - name: lock
         run: dune pkg lock
