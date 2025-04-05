@@ -1,32 +1,40 @@
 #!/usr/bin/env bash
-# Script to run all Kani tests using BFA Rust.
+# Script to run all Miri tests using BFA Rust.
 #
-# Requirement: the https://github.com/model-checking/kani repository must be cloned
+# Requirement: the https://github.com/rust-lang/miri/ repository must be cloned
 #              as a sibling directory to the bfa-ocaml repository.
 #
 # Behaviour: runs tests, one by one. Stops on the first failure.
 #
-# Usage: ./kani.sh
+# Usage: ./miri.sh
 #
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 source $SCRIPT_DIR/common.sh
 
-# Tests are in kani/tests/<category...>/<test>.rs
-KANI_PATH=$(realpath $SCRIPT_DIR/../../../kani)
+# Tests are in miri/tests/<pass/panic/fail>/<...test>.rs
+MIRI_PATH=$(realpath $SCRIPT_DIR/../../../miri)
 
 # Handle arguments:
 CMD="bfa-rust exec-main"
 STOP_ON_FAIL=true
 STORE_PASSES=false
-TESTS=$(find $KANI_PATH/tests/kani -name '*.rs' | sort)
+
+# we exclude some stuff, that is irrelevant or not worth testing:
+# - ui.rs (not a test)
+# - fail-dep/ and pass-dep/ (avoid downloading dependencies)
+# - native-lib/ (don't handle it)
+# - many-seeds/ (multithreading)
+# - utils/ (not tests)
+# - *stacked-borrows*, *stacked_borrows*
+# - *concurrency*
+TESTS=$(find $MIRI_PATH/tests -name '*.rs' ! -name 'ui.rs' \
+  ! -path '*/fail-dep/*' ! -path '*/pass-dep/*' ! -path '*/native-lib/*' \
+  ! -path '*/many-seeds/*' ! -path '*/utils/*' ! -path '*/stacked-borrows/*' \
+  ! -path '*/concurrency/*' ! -path '*/stacked_borrows/*' \
+  | sort)
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -d|--directory)
-            TESTS=$(find $KANI_PATH/tests/$2 -name '*.rs' | sort)
-            shift
-            shift
-            ;;
         -f|--filter)
             TESTS=$(echo $TESTS | xargs -n1 | grep $2)
             shift
@@ -63,7 +71,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help)
             echo -e "${BOLD}Options:$RESET"
-            echo -e "  $CYAN-d, --directory <path>$RESET     Specify the subdirectory to search for tests, default is kani"
             echo -e "  $CYAN-f, --filter <pattern>$RESET     Filter by a given pattern"
             echo -e "  $CYAN-e, --exclude <pattern>$RESET    Exclude by a given pattern"
             echo -e "  $CYAN--no-compile$RESET               Do not re-compile files"
@@ -97,8 +104,9 @@ passed=0
 failed=0
 script_start=$(($(date +%s%N)/1000000))
 for test in $TESTS; do
-    test_rel_name=$(realpath --relative-to=$KANI_PATH $test)
-    expect_failure=$(grep -c "kani-verify-fail" "$test")
+    test_rel_name=$(realpath --relative-to=$MIRI_PATH $test)
+    # expect failure if "fail" or "panic" in test_rel_name
+    expect_failure=$(grep -c -e "fail" -e "panic" <<< "$test_rel_name")
 
     echo -en "$(rainbow step)|${RESET} Running $test_rel_name ..."
     echo "Running $test" >> $LOG_FILE

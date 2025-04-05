@@ -1,9 +1,13 @@
 open Charon
 open Typed
 
+type 'ptr full_ptr = 'ptr * T.cval Typed.t option
+[@@deriving show { with_path = false }]
+
 type 'ptr rust_val =
   | Base of T.cval Typed.t
-  | Ptr of 'ptr  (** pointer, parametric to enable Ruxt *)
+  | Ptr of 'ptr full_ptr
+      (** pointer, parametric to enable Ruxt, with optional meta *)
   | Enum of T.cval Typed.t * 'ptr rust_val list  (** discriminant * values *)
   | Struct of 'ptr rust_val list  (** contains ordered fields *)
   | Tuple of 'ptr rust_val list
@@ -20,25 +24,7 @@ let type_of_operand : Expressions.operand -> Types.ty = function
   | Constant c -> c.ty
   | Copy p | Move p -> p.ty
 
-let lit_to_string : Values.literal_type -> string = function
-  | TInteger Isize -> "isize"
-  | TInteger I8 -> "i8"
-  | TInteger I16 -> "i16"
-  | TInteger I32 -> "i32"
-  | TInteger I64 -> "i64"
-  | TInteger I128 -> "i128"
-  | TInteger Usize -> "usize"
-  | TInteger U8 -> "u8"
-  | TInteger U16 -> "u16"
-  | TInteger U32 -> "u32"
-  | TInteger U64 -> "u64"
-  | TInteger U128 -> "u128"
-  | TFloat F16 -> "f16"
-  | TFloat F32 -> "f32"
-  | TFloat F64 -> "f64"
-  | TFloat F128 -> "f128"
-  | TChar -> "char"
-  | TBool -> "bool"
+let lit_to_string = PrintValues.literal_type_to_string
 
 let as_ptr = function
   | Ptr ptr -> ptr

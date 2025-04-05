@@ -19,9 +19,14 @@
   linol-eio
   eio_main
   printbox-text
-  charon)
+  charon
+  dune-site)
  (flags :standard -open Bfa_std)
  (preprocess
   (pps ppx_deriving.std ppx_symex))
  (instrumentation
   (backend landmarks --auto)))
+
+(generate_sites_module
+ (module runtime_sites)
+ (sites bfa-rust))

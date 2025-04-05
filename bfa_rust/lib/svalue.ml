@@ -216,12 +216,38 @@ let and_ v1 v2 =
   | _ -> Binop (And, v1, v2) <| TBool
 
 let conj l = List.fold_left and_ v_true l
+let int_z z = Int z <| TInt
+let int i = int_z (Z.of_int i)
+let zero = int_z Z.zero
+let one = int_z Z.one
+
+let not sv =
+  if equal sv v_true then v_false
+  else if equal sv v_false then v_true
+  else
+    match sv.node.kind with
+    | Unop (Not, sv) -> sv
+    | Binop (Lt, v1, v2) -> Binop (Leq, v2, v1) <| TBool
+    | Binop (Leq, v1, v2) -> Binop (Lt, v2, v1) <| TBool
+    | Binop (Or, v1, v2) -> Binop (And, v1, v2) <| TBool
+    | _ -> Unop (Not, sv) <| TBool
 
 let rec sem_eq v1 v2 =
   match (v1.node.kind, v2.node.kind) with
   | Int z1, Int z2 -> bool (Z.equal z1 z2)
   | Bool b1, Bool b2 -> bool (b1 = b2)
   | Ptr (l1, o1), Ptr (l2, o2) -> and_ (sem_eq l1 l2) (sem_eq o1 o2)
+  | Binop (Plus, v1, { node = { kind = Int x; _ }; _ }), Int y
+  | Binop (Plus, { node = { kind = Int x; _ }; _ }, v1), Int y
+  | Int y, Binop (Plus, v1, { node = { kind = Int x; _ }; _ })
+  | Int y, Binop (Plus, { node = { kind = Int x; _ }; _ }, v1) ->
+      sem_eq v1 (int_z @@ Z.sub y x)
+  | Binop (Minus, v1, { node = { kind = Int x; _ }; _ }), Int y
+  | Binop (Minus, { node = { kind = Int x; _ }; _ }, v1), Int y
+  | Int y, Binop (Minus, v1, { node = { kind = Int x; _ }; _ })
+  | Int y, Binop (Minus, { node = { kind = Int x; _ }; _ }, v1) ->
+      sem_eq v1 (int_z @@ Z.add y x)
+  | Unop (IntOfBool, v1), Int z -> if Z.equal Z.zero z then not v1 else v1
   | _ ->
       if equal v1 v2 then v_true (* Start with a syntactic check *)
       else Binop (Eq, v1, v2) <| TBool
@@ -237,14 +263,6 @@ let or_ v1 v2 =
   | _, Bool false -> v1
   | _ -> Binop (Or, v1, v2) <| TBool
 
-let not sv =
-  if equal sv v_true then v_false
-  else if equal sv v_false then v_true
-  else
-    match sv.node.kind with
-    | Unop (Not, sv) -> sv
-    | _ -> Unop (Not, sv) <| TBool
-
 let rec split_ands (sv : t) (f : t -> unit) : unit =
   match sv.node.kind with
   | Binop (And, s1, s2) ->
@@ -259,11 +277,6 @@ let distinct l =
   | l -> Nop (Distinct, l) <| TBool
 
 (** {2 Integers} *)
-
-let int_z z = Int z <| TInt
-let int i = int_z (Z.of_int i)
-let zero = int_z Z.zero
-let one = int_z Z.one
 
 let int_of_bool b =
   match b.node.kind with
@@ -283,9 +296,43 @@ let rec lt v1 v2 =
   | _, _ when equal v1 v2 -> v_false
   | _, Binop (Plus, v2, v3) when equal v1 v2 -> lt zero v3
   | Binop (Plus, v1, v2), Binop (Plus, v3, v4) when equal v1 v3 -> lt v2 v4
+  | Binop (Plus, v1, { node = { kind = Int x; _ }; _ }), Int y
+  | Binop (Plus, { node = { kind = Int x; _ }; _ }, v1), Int y ->
+      lt v1 (int_z @@ Z.sub y x)
+  | Binop (Minus, v1, { node = { kind = Int x; _ }; _ }), Int y
+  | Binop (Minus, { node = { kind = Int x; _ }; _ }, v1), Int y ->
+      lt v1 (int_z @@ Z.add y x)
+  | Int y, Binop (Plus, v1, { node = { kind = Int x; _ }; _ })
+  | Int y, Binop (Plus, { node = { kind = Int x; _ }; _ }, v1) ->
+      lt (int_z @@ Z.sub y x) v1
+  | Int y, Binop (Minus, v1, { node = { kind = Int x; _ }; _ })
+  | Int y, Binop (Minus, { node = { kind = Int x; _ }; _ }, v1) ->
+      lt (int_z @@ Z.add y x) v1
   | _ -> Binop (Lt, v1, v2) <| TBool
 
 let gt v1 v2 = lt v2 v1
+
+let rec leq v1 v2 =
+  match (v1.node.kind, v2.node.kind) with
+  | Int i1, Int i2 -> bool (Z.leq i1 i2)
+  | _, _ when equal v1 v2 -> v_true
+  | _, Binop (Plus, v2, v3) when equal v1 v2 -> leq zero v3
+  | Binop (Plus, v1, v2), Binop (Plus, v3, v4) when equal v1 v3 -> leq v2 v4
+  | Binop (Plus, v1, { node = { kind = Int x; _ }; _ }), Int y
+  | Binop (Plus, { node = { kind = Int x; _ }; _ }, v1), Int y ->
+      leq v1 (int_z @@ Z.sub y x)
+  | Binop (Minus, v1, { node = { kind = Int x; _ }; _ }), Int y
+  | Binop (Minus, { node = { kind = Int x; _ }; _ }, v1), Int y ->
+      leq v1 (int_z @@ Z.add y x)
+  | Int y, Binop (Plus, v1, { node = { kind = Int x; _ }; _ })
+  | Int y, Binop (Plus, { node = { kind = Int x; _ }; _ }, v1) ->
+      leq (int_z @@ Z.sub y x) v1
+  | Int y, Binop (Minus, v1, { node = { kind = Int x; _ }; _ })
+  | Int y, Binop (Minus, { node = { kind = Int x; _ }; _ }, v1) ->
+      leq (int_z @@ Z.add y x) v1
+  | _ -> Binop (Leq, v1, v2) <| TBool
+
+let geq v1 v2 = leq v2 v1
 
 let rec plus v1 v2 =
   match (v1.node.kind, v2.node.kind) with
@@ -310,29 +357,29 @@ let times v1 v2 =
   | Int i1, Int i2 -> int_z (Z.mul i1 i2)
   | _ -> Binop (Times, v1, v2) <| TInt
 
-let rec leq v1 v2 =
-  match (v1.node.kind, v2.node.kind) with
-  | Int i1, Int i2 -> bool (Z.leq i1 i2)
-  | _, _ when equal v1 v2 -> v_true
-  | _, Binop (Plus, v2, v3) when equal v1 v2 -> leq zero v3
-  | Binop (Plus, v1, v2), Binop (Plus, v3, v4) when equal v1 v3 -> leq v2 v4
-  | _ -> Binop (Leq, v1, v2) <| TBool
-
-let geq v1 v2 = leq v2 v1
-
 let div v1 v2 =
   match (v1.node.kind, v2.node.kind) with
   | _, _ when equal v2 one -> v1
   | Int i1, Int i2 -> int_z (Z.div i1 i2)
   | _ -> Binop (Div, v1, v2) <| TInt
 
+let rec is_mod v n =
+  match v.node.kind with
+  | Int i1 -> Z.equal (Z.( mod ) i1 n) Z.zero
+  | Binop (Plus, v2, v3) -> is_mod v2 n && is_mod v3 n
+  | Binop (Minus, v2, v3) -> is_mod v2 n && is_mod v3 n
+  | Binop (Times, v2, v3) -> is_mod v2 n || is_mod v3 n
+  | _ -> false
+
 let rem v1 v2 =
   match (v1.node.kind, v2.node.kind) with
+  | _, Int i2 when is_mod v1 i2 -> int_z Z.zero
   | Int i1, Int i2 -> int_z (Z.rem i1 i2)
   | _ -> Binop (Rem, v1, v2) <| TInt
 
 let ( mod ) v1 v2 =
   match (v1.node.kind, v2.node.kind) with
+  | _, Int i2 when is_mod v1 i2 -> int_z Z.zero
   | Int i1, Int i2 -> int_z (Z.( mod ) i1 i2)
   | _ -> Binop (Mod, v1, v2) <| TInt
 

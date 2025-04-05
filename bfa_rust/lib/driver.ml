@@ -8,6 +8,7 @@ module Cleaner = struct
   let files = ref []
   let touched file = files := file :: !files
   let cleanup () = List.iter Sys.remove !files
+  let init ~clean () = if clean then at_exit cleanup
 end
 
 let setup_console_log level =
@@ -30,6 +31,7 @@ let pp_err ft (err, call_trace) =
     | `UBPointerArithmetic -> Fmt.string ft "UBPointerArithmetic"
     | `UBAbort -> Fmt.string ft "UBAbort"
     | `UBTransmute -> Fmt.string ft "UBTransmute"
+    | `UBTreeBorrow -> Fmt.string ft "UBTreeBorrow"
     | `DoubleFree -> Fmt.string ft "DoubleFree"
     | `InvalidFree -> Fmt.string ft "InvalidFree"
     | `Memory_leak -> Fmt.string ft "Memory leak"
@@ -42,61 +44,97 @@ let pp_err ft (err, call_trace) =
   Fmt.pf ft " with trace %a" Call_trace.pp call_trace;
   Format.close_box ()
 
+let exec_cmd cmd =
+  L.debug (fun g -> g "Running command: %s" cmd);
+  Sys.command cmd
+
+let find_kani_lib ~no_compile () =
+  let path =
+    try
+      let path = Sys.getenv "KANI_LIB_PATH" in
+      if String.ends_with ~suffix:"/" path then
+        String.sub path 0 (String.length path - 1)
+      else path
+    with Not_found -> List.hd Runtime_sites.Sites.kani_lib
+  in
+  match no_compile with
+  | true -> path
+  | false ->
+      let res =
+        Fmt.kstr exec_cmd
+          "cd %s/kani && charon --only-cargo --lib --input ./src/ > /dev/null \
+           2>/dev/null"
+          path
+      in
+      if res <> 0 && res <> 255 then
+        raise
+          (ExecutionError
+             ("Couldn't compile Kani lib: error " ^ Int.to_string res));
+      path
+
 (** Given a Rust file, parse it into LLBC, using Charon. *)
 let parse_ullbc_of_file ~no_compile file_name =
+  let file_name =
+    if Filename.is_relative file_name then
+      Filename.concat (Sys.getcwd ()) file_name
+    else file_name
+  in
   let parent_folder = Filename.dirname file_name in
   let output = Printf.sprintf "%s.llbc.json" file_name in
-  if not no_compile then (
-    (* load from env *)
-    let kani_lib =
-      try
-        let path = Sys.getenv "KANI_LIB_PATH" in
-        if String.ends_with ~suffix:"/" path then path else path ^ "/"
-      with Not_found -> raise (ExecutionError "KANI_LIB_PATH not set")
-    in
-    let cmd =
-      String.concat " "
-        [
-          Fmt.str "cd %s &&" parent_folder;
-          "charon --ullbc";
-          Fmt.str "--input %s" file_name;
-          Fmt.str "--dest-file %s" output;
-          (* We can't enable this because it removes statements we care about... *)
-          (* "--mir_optimized"; *)
-          (* We don't care about our implementation *)
-          "--opaque=kani";
-          "--translate-all-methods";
-          "--monomorphize";
-          "--extract-opaque-bodies";
-          (* Go through rustc to allow injecting the kani deps *)
-          "--no-cargo";
-          (* i.e. not always a binary! *)
-          "--rustc-arg=--crate-type=lib";
-          "--rustc-arg=-Zunstable-options";
-          "--rustc-arg=-Zcrate-attr=feature\\(register_tool\\)";
-          "--rustc-arg=-Zcrate-attr=register_tool\\(kanitool\\)";
-          (* Code often hides kani proofs behind a cfg *)
-          "--rustc-arg=--cfg=kani";
-          (* Not sure this is needed *)
-          "--rustc-arg=--extern=kani";
-          "--rustc-arg=--extern=std";
-          (* The below is cursed and should be fixed !!! *)
-          Fmt.str "--rustc-arg=-L%skani/target/aarch64-apple-darwin/debug/deps"
-            kani_lib;
-          Fmt.str "--rustc-arg=-L%skani/target/debug/deps" kani_lib;
-        ]
-    in
-    L.debug (fun g -> g "Running command: %s" cmd);
-    let res = Sys.command cmd in
-    if res = 0 then Cleaner.touched output
-    else
-      let msg = Fmt.str "Failed compilation to ULLBC: code %d" res in
-      raise (CharonError msg));
+  (if not no_compile then
+     let kani_args =
+       let kani_lib = find_kani_lib ~no_compile () in
+       [
+         "--opaque=kani";
+         "--rustc-arg=-Zcrate-attr=feature\\(register_tool\\)";
+         "--rustc-arg=-Zcrate-attr=register_tool\\(kanitool\\)";
+         (* Code often hides kani proofs behind a cfg *)
+         "--rustc-arg=--cfg=kani";
+         "--rustc-arg=--extern=kani";
+         (* The below is cursed and should be fixed !!! *)
+         Fmt.str "--rustc-arg=-L%s/kani/target/aarch64-apple-darwin/debug/deps"
+           kani_lib;
+         Fmt.str "--rustc-arg=-L%s/kani/target/debug/deps" kani_lib;
+       ]
+     in
+     let miri_args = [ "--opaque=miri_extern" ] in
+     let res =
+       String.concat " "
+       @@ [
+            Fmt.str "cd %s &&" parent_folder;
+            "charon --ullbc";
+            Fmt.str "--input %s" file_name;
+            Fmt.str "--dest-file %s" output;
+            (* We can't enable this because it removes statements we care about... *)
+            (* "--mir_optimized"; *)
+            (* We don't care about our implementation *)
+            "--translate-all-methods";
+            "--monomorphize";
+            "--extract-opaque-bodies";
+            (* Go through rustc to allow injecting the kani deps *)
+            "--no-cargo";
+            (* i.e. not always a binary! *)
+            "--rustc-arg=--crate-type=lib";
+            "--rustc-arg=-Zunstable-options";
+            (* Not sure this is needed *)
+            "--rustc-arg=--extern=std";
+            "--rustc-arg=--extern=core";
+            (* No warning *)
+            "--rustc-arg=-Awarnings";
+          ]
+       @ kani_args
+       @ miri_args
+       |> exec_cmd
+     in
+     if res = 0 then Cleaner.touched output
+     else
+       let msg = Fmt.str "Failed compilation to ULLBC: code %d" res in
+       raise (CharonError msg));
   let crate =
     try
       output |> Yojson.Basic.from_file |> Charon.UllbcOfJson.crate_of_json
     with
-    | Sys_error _ -> raise (ExecutionError "File doesn't exist")
+    | Sys_error _ -> raise (CharonError "File doesn't exist")
     | _ -> raise (CharonError "Failed to parse ULLBC")
   in
   match crate with
@@ -190,21 +228,19 @@ let exec_main (crate : Charon.UllbcAst.crate) =
   |> Result.map List.flatten
   |> Result.map_error (String.concat "\n\n")
 
-let exec_main_and_print log_level smt_file no_compile clean_up file_name =
+let exec_main_and_print log_level smt_file no_compile clean file_name =
   Z3solver.set_smt_file smt_file;
   setup_console_log log_level;
+  Cleaner.init ~clean ();
   try
     let crate = parse_ullbc_of_file ~no_compile file_name in
     let res = exec_main crate in
-    if clean_up then Cleaner.cleanup ();
     match res with
     | Ok res ->
         let open Fmt in
         let n = List.length res in
-        let pp_pc ft pc =
-          pf ft "@[%a@]" (list ~sep:(any " /\\@, ") Typed.ppa) pc
-        in
-        let pp_info ft pc = pf ft "PC: @[%a@]" pp_pc pc in
+        let pp_pc ft pc = pf ft "%a" (list ~sep:(any " /\\@, ") Typed.ppa) pc in
+        let pp_info ft pc = pf ft "PC: @.  @[<-1>%a@]" pp_pc pc in
         Fmt.pr "Done. - Ran %i branches\n%a\n" n
           (list ~sep:(any "@\n@\n") pp_info)
           res;
@@ -214,10 +250,8 @@ let exec_main_and_print log_level smt_file no_compile clean_up file_name =
         exit 1
   with
   | ExecutionError e ->
-      if clean_up then Cleaner.cleanup ();
       L.err (fun f -> f "Fatal: %s" e);
       exit 2
   | CharonError e ->
-      if clean_up then Cleaner.cleanup ();
       L.err (fun f -> f "Fatal (Charon): %s" e);
       exit 3

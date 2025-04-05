@@ -1,8 +1,13 @@
+open Charon_util
 open Typed
 open T
+open Rustsymex
+open Charon
 
 module type S = sig
   module Sptr : Sptr.S
+
+  type full_ptr := Sptr.t full_ptr
 
   (* state *)
   type t
@@ -19,91 +24,102 @@ module type S = sig
 
   val load :
     ?is_move:bool ->
-    Sptr.t ->
-    Charon.Types.ty ->
+    full_ptr ->
+    Types.ty ->
     t ->
-    ( Sptr.t Charon_util.rust_val * t,
+    ( Sptr.t rust_val * t,
       [> `NullDereference
       | `OutOfBounds
       | `UninitializedMemoryAccess
       | `UseAfterFree
-      | `UBTransmute ]
+      | `UBTransmute
+      | `UBTreeBorrow ]
       err,
       serialized list )
-    Rustsymex.Result.t
+    Result.t
 
   val store :
-    Sptr.t ->
-    Charon.Types.ty ->
-    Sptr.t Charon_util.rust_val ->
+    full_ptr ->
+    Types.ty ->
+    Sptr.t rust_val ->
     t ->
     ( unit * t,
-      [> `NullDereference | `OutOfBounds | `UseAfterFree ] err,
+      [> `NullDereference | `OutOfBounds | `UBTreeBorrow | `UseAfterFree ] err,
       serialized list )
-    Rustsymex.Result.t
+    Result.t
 
   val alloc :
-    sint Typed.t ->
-    t ->
-    (Sptr.t * t, [> ] err, serialized list) Rustsymex.Result.t
+    sint Typed.t -> t -> (full_ptr * t, [> ] err, serialized list) Result.t
 
   val alloc_ty :
-    Charon.Types.ty ->
-    t ->
-    (Sptr.t * t, [> ] err, serialized list) Rustsymex.Result.t
+    Types.ty -> t -> (full_ptr * t, [> ] err, serialized list) Result.t
 
   val free :
-    Sptr.t ->
+    full_ptr ->
     t ->
-    ( unit * t,
-      [> `InvalidFree | `UseAfterFree ] err,
-      serialized list )
-    Rustsymex.Result.t
-
-  val uninit :
-    Sptr.t ->
-    Charon.Types.ty ->
-    t ->
-    ( unit * t,
-      [> `NullDereference | `OutOfBounds | `UseAfterFree ] err,
-      serialized list )
-    Rustsymex.Result.t
+    (unit * t, [> `InvalidFree | `UseAfterFree ] err, serialized list) Result.t
 
   val copy_nonoverlapping :
-    dst:Sptr.t ->
-    src:Sptr.t ->
+    dst:full_ptr ->
+    src:full_ptr ->
     size:sint Typed.t ->
     t ->
     ( unit * t,
       [> `NullDereference | `OutOfBounds | `UseAfterFree ] err,
       serialized list )
-    Rustsymex.Result.t
+    Result.t
 
-  val error : 'a -> t -> ('ok, 'a err, serialized list) Rustsymex.Result.t
-  val produce : serialized -> t -> t Rustsymex.t
+  val uninit :
+    full_ptr ->
+    Types.ty ->
+    t ->
+    ( unit * t,
+      [> `NullDereference | `OutOfBounds | `UseAfterFree ] err,
+      serialized list )
+    Result.t
 
-  val consume :
-    serialized -> t -> (t, [> ] err, serialized list) Rustsymex.Result.t
+  val error : 'a -> t -> ('ok, 'a err, serialized list) Result.t
 
   val store_str_global :
-    string ->
-    Sptr.t ->
-    t ->
-    (unit * t, [> ] err, serialized list) Rustsymex.Result.t
+    string -> full_ptr -> t -> (unit * t, [> ] err, serialized list) Result.t
 
   val store_global :
-    Charon.Types.global_decl_id ->
-    Sptr.t ->
+    Types.global_decl_id ->
+    full_ptr ->
     t ->
-    (unit * t, [> ] err, serialized list) Rustsymex.Result.t
+    (unit * t, [> ] err, serialized list) Result.t
 
   val load_str_global :
-    string ->
-    t ->
-    (Sptr.t option * t, [> ] err, serialized list) Rustsymex.Result.t
+    string -> t -> (full_ptr option * t, [> ] err, serialized list) Result.t
 
   val load_global :
-    Charon.Types.global_decl_id ->
+    Types.global_decl_id ->
     t ->
-    (Sptr.t option * t, [> ] err, serialized list) Rustsymex.Result.t
+    (full_ptr option * t, [> ] err, serialized list) Result.t
+
+  val borrow :
+    full_ptr ->
+    Expressions.borrow_kind ->
+    t ->
+    ( full_ptr * t,
+      [> `NullDereference | `UseAfterFree ] err,
+      serialized list )
+    Result.t
+
+  val protect :
+    full_ptr ->
+    Charon.Types.ref_kind ->
+    t ->
+    ( full_ptr * t,
+      [> `NullDereference | `UseAfterFree ] err,
+      serialized list )
+    Result.t
+
+  val unprotect :
+    full_ptr ->
+    t ->
+    ( unit * t,
+      [> `NullDereference | `UseAfterFree ] err,
+      serialized list )
+    Result.t
 end

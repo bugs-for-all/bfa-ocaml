@@ -10,7 +10,7 @@ module type S = sig
   val pp : t Fmt.t
   val null_ptr : t
 
-  (** Pointer equality, irrespective of metadata *)
+  (** Pointer equality *)
   val sem_eq : t -> t -> sbool Typed.t
 
   (** If this pointer is at a null location, i.e. has no provenance *)
@@ -30,12 +30,6 @@ module type S = sig
       defaults to u8. *)
   val offset : ?ty:Charon.Types.ty -> t -> sint Typed.t -> t
 
-  (** The metadata of the pointer, if it's a fat pointer *)
-  val meta : t -> T.cval Typed.t option
-
-  (** Sets the metadata of the pointer *)
-  val with_meta : ?meta:T.cval Typed.t -> t -> t
-
   (** Project a pointer to a field of the given type. *)
   val project :
     Types.ty -> Expressions.field_proj_kind -> Types.field_id -> t -> t
@@ -43,16 +37,13 @@ end
 
 (** A pointer that can perform pointer arithmetics -- all pointers are a pair of
     location and offset, along with an optional metadata. *)
-module ArithPtr : S with type t = T.sptr Typed.t * T.cval Typed.t option =
-struct
-  type t = T.sptr Typed.t * T.cval Typed.t option
+module ArithPtr : S with type t = T.sptr Typed.t * Tree_borrow.tag = struct
+  type t = T.sptr Typed.t * Tree_borrow.tag
 
-  let pp fmt (ptr, meta) =
-    match meta with
-    | Some meta -> Format.fprintf fmt "%a (%a)" Typed.ppa ptr Typed.ppa meta
-    | None -> Format.fprintf fmt "%a" Typed.ppa ptr
+  let pp fmt (ptr, tag) =
+    Fmt.pf fmt "%a[%a]" Typed.ppa ptr Tree_borrow.pp_tag tag
 
-  let null_ptr = (Typed.Ptr.null, None)
+  let null_ptr = (Typed.Ptr.null, Tree_borrow.zero)
   let sem_eq (ptr1, _) (ptr2, _) = ptr1 ==@ ptr2
   let is_at_null_loc (ptr, _) = Typed.Ptr.is_at_null_loc ptr
 
@@ -67,13 +58,10 @@ struct
       let ofs = Typed.Ptr.ofs ptr in
       Typed.conj (offset_constrs ofs)
 
-  let offset ?(ty = Types.TLiteral (TInteger U8)) (ptr, meta) off =
+  let offset ?(ty = Types.TLiteral (TInteger U8)) (ptr, tag) off =
     let { size; _ } : Layout.layout = Layout.layout_of ty in
     let ptr' = Typed.Ptr.add_ofs ptr (Typed.int size *@ off) in
-    (ptr', meta)
-
-  let meta = snd
-  let with_meta ?meta (ptr, _) = (ptr, meta)
+    (ptr', tag)
 
   let project ty kind field ptr =
     let field = Types.FieldId.to_int field in

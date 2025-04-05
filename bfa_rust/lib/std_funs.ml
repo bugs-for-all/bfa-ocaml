@@ -1,5 +1,6 @@
 open Charon
 module NameMatcherMap = Charon.NameMatcher.NameMatcherMap
+open Bfa_symex.Compo_res
 open Rustsymex
 open Rustsymex.Syntax
 open Typed.Syntax
@@ -104,8 +105,8 @@ module M (Heap : Heap_intf.S) = struct
   let checked_op op (fun_sig : UllbcAst.fun_sig) ~crate ~args ~state =
     let+ res = unchecked_op op fun_sig ~crate ~args ~state in
     match res with
-    | Ok (res, state) -> Bfa_symex.Compo_res.Ok (Enum (1s, [ res ]), state)
-    | _ -> Bfa_symex.Compo_res.Ok (Enum (0s, []), state)
+    | Ok (res, state) -> Ok (Enum (1s, [ res ]), state)
+    | _ -> Ok (Enum (0s, []), state)
 
   let wrapping_op op (fun_sig : UllbcAst.fun_sig) ~crate:_ ~args ~state =
     let* ty =
@@ -150,7 +151,7 @@ module M (Heap : Heap_intf.S) = struct
             "is_some expects a single ptr argument and a single tref input type"
     in
     let** enum_value, state = Heap.load val_ptr opt_ty state in
-    let* discr =
+    let+ discr =
       match enum_value with
       | Enum (discr, _) -> return discr
       | _ ->
@@ -158,7 +159,7 @@ module M (Heap : Heap_intf.S) = struct
             "expected value pointed to in is_some to be an enum, got %a"
             pp_rust_val enum_value
     in
-    Result.ok (Base (Typed.int_of_bool (discr ==@ 1s)), state)
+    Ok (Base (Typed.int_of_bool (discr ==@ 1s)), state)
 
   let is_none (fun_sig : UllbcAst.fun_sig) ~crate:_ ~args ~state =
     let val_ptr, opt_ty =
@@ -266,28 +267,15 @@ module M (Heap : Heap_intf.S) = struct
       | [ Ptr b ] -> b
       | _ -> failwith "bool_not expects one Ptr argument"
     in
-    let** b_rval, state = Heap.load b_ptr (Types.TLiteral TBool) state in
+    let++ b_rval, state = Heap.load b_ptr (Types.TLiteral TBool) state in
     let b_int = as_base_of ~ty:Typed.t_int b_rval in
     let b_int' = Typed.not_int_bool b_int in
-    Result.ok (Base b_int', state)
+    (Base b_int', state)
 
-  let zeroed (fun_sig : UllbcAst.fun_sig) ~(crate : UllbcAst.crate) ~args:_
-      ~state =
-    let rec aux : Types.ty -> rust_val = function
-      | TLiteral _ -> Base Typed.zero
-      | TRawPtr _ | TRef _ -> Ptr Sptr.null_ptr
-      | TAdt (TAdtId t_id, _) -> (
-          let adt = Types.TypeDeclId.Map.find t_id crate.type_decls in
-          match adt.kind with
-          | Struct fields ->
-              Struct (List.map (fun (f : Types.field) -> aux f.field_ty) fields)
-          | Enum [] -> failwith "zeroed does not handle empty enums!"
-          | k ->
-              Fmt.failwith "Unhandled zeroed ADT kind: %a"
-                Types.pp_type_decl_kind k)
-      | ty -> Fmt.failwith "Unhandled zeroed type: %a" Types.pp_ty ty
-    in
-    try Result.ok (aux fun_sig.output, state) with Failure f -> not_impl f
+  let zeroed (fun_sig : UllbcAst.fun_sig) ~crate:_ ~args:_ ~state =
+    match Layout.zeroed ~null_ptr:Sptr.null_ptr fun_sig.output with
+    | Some v -> Result.ok (v, state)
+    | None -> Heap.error (`StdErr "Non-zeroable type") state
 
   let array_repeat (gen_args : Types.generic_args) ~crate:_ ~args ~state =
     let rust_val, size =
@@ -306,12 +294,12 @@ module M (Heap : Heap_intf.S) = struct
 
   let array_index (idx_op : Expressions.builtin_index_op)
       (gen_args : Types.generic_args) ~crate:_ ~args ~state =
-    let ptr = as_ptr @@ List.hd args in
-    let size =
-      match (idx_op.is_array, Sptr.meta ptr, gen_args.const_generics) with
+    let ptr, size =
+      match (idx_op.is_array, List.hd args, gen_args.const_generics) with
       (* Array with static size *)
-      | true, _, [ size ] -> Typed.int @@ Charon_util.int_of_const_generic size
-      | false, Some size, [] -> Typed.cast size
+      | true, Ptr (ptr, None), [ size ] ->
+          (ptr, Typed.int @@ Charon_util.int_of_const_generic size)
+      | false, Ptr (ptr, Some size), [] -> (ptr, Typed.cast size)
       | _ ->
           Fmt.failwith "array_index: unexpected arguments: %a / %a"
             Fmt.(list pp_rust_val)
@@ -324,14 +312,13 @@ module M (Heap : Heap_intf.S) = struct
     if%sat 0s <=@ idx &&@ (idx <@ size) then
       let ty = List.hd gen_args.types in
       let ptr' = Sptr.offset ~ty ptr idx in
-      if not idx_op.is_range then Result.ok (Ptr ptr', state)
+      if not idx_op.is_range then Result.ok (Ptr (ptr', None), state)
       else
         let range_end = as_base_of ~ty:Typed.t_int (List.nth args 2) in
         (* range_end is exclusive *)
         if%sat idx <=@ range_end &&@ (range_end <=@ size) then
           let size = range_end -@ idx in
-          let ptr' = Sptr.with_meta ~meta:size ptr' in
-          Result.ok (Ptr ptr', state)
+          Result.ok (Ptr (ptr', Some size), state)
         else
           (* not sure this is the right diagnostic *)
           Heap.error `OutOfBounds state
@@ -362,7 +349,7 @@ module M (Heap : Heap_intf.S) = struct
       match (args, gargs.const_generics) with
       (* Array with static size *)
       | _, [ size ] -> Typed.int @@ Charon_util.int_of_const_generic size
-      | Ptr ptr :: _, [] -> Typed.cast @@ Option.get @@ Sptr.meta ptr
+      | Ptr (_, Some size) :: _, [] -> Typed.cast size
       | _ -> failwith "array_index (fn): couldn't calculate size"
     in
     let ptr, idx_from, idx_to =
@@ -391,14 +378,12 @@ module M (Heap : Heap_intf.S) = struct
       | _ -> failwith "array_slice: unexpected generic constants"
     in
     match args with
-    | [ Ptr arr_ptr ] ->
-        let ptr' = Sptr.with_meta ~meta:(Typed.int size) arr_ptr in
-        Result.ok (Ptr ptr', state)
+    | [ Ptr (ptr, None) ] -> Result.ok (Ptr (ptr, Some (Typed.int size)), state)
     | _ -> failwith "array_index: unexpected arguments"
 
   let slice_len _ ~crate:_ ~args ~state =
     match args with
-    | [ Ptr ptr ] -> Result.ok (Base (Option.get @@ Sptr.meta ptr), state)
+    | [ Ptr (_, Some size) ] -> Result.ok (Base size, state)
     | _ -> failwith "slice_len: unexpected arguments"
 
   let discriminant_value (funsig : GAst.fun_sig) ~crate:_ ~args ~state =
@@ -419,21 +404,19 @@ module M (Heap : Heap_intf.S) = struct
 
   let to_string _ ~crate:_ ~args ~state =
     match args with
-    | [ (Ptr ptr as slice) ] ->
-        Result.ok (Struct [ slice; Base (Option.get @@ Sptr.meta ptr) ], state)
+    | [ (Ptr (_, Some len) as slice) ] ->
+        Result.ok (Struct [ slice; Base len ], state)
     | _ -> failwith "to_string: unexpected value"
 
   let str_chars _ ~crate:_ ~args ~state =
-    let ptr =
+    let ptr, len =
       match args with
-      | [ Ptr ptr ] -> ptr
+      | [ Ptr (ptr, Some len) ] -> (ptr, Typed.cast len)
       | _ -> failwith "str_chars: unexpected value"
     in
-    let len = Option.get @@ Sptr.meta ptr in
-    let len = Typed.cast len in
     let ty = Types.TLiteral TChar in
     let arr_end = Sptr.offset ~ty ptr len in
-    Result.ok (Struct [ Ptr ptr; Ptr arr_end ], state)
+    Result.ok (Struct [ Ptr (ptr, None); Ptr (arr_end, None) ], state)
 
   let iter_nth (fun_sig : GAst.fun_sig) ~crate ~args ~state =
     let iter_ptr, idx =
@@ -458,15 +441,16 @@ module M (Heap : Heap_intf.S) = struct
     let** iter, state = Heap.load iter_ptr iter_ty state in
     let start_ptr, end_ptr =
       match iter with
-      | Struct [ Ptr start_ptr; Ptr end_ptr ] -> (start_ptr, end_ptr)
+      | Struct [ Ptr (start_ptr, None); Ptr (end_ptr, None) ] ->
+          (start_ptr, end_ptr)
       | _ -> failwith "iter_nth: unexpected iter structure"
     in
     if%sat Sptr.is_same_loc start_ptr end_ptr then
       let ptr = Sptr.offset ~ty:sub_ty start_ptr idx in
       let dist = Sptr.distance ptr end_ptr in
       if%sat dist <@ 0s then
-        let iter' = Struct [ Ptr ptr; Ptr end_ptr ] in
-        let** value, state = Heap.load ptr sub_ty state in
+        let iter' = Struct [ Ptr (ptr, None); Ptr (end_ptr, None) ] in
+        let** value, state = Heap.load (ptr, None) sub_ty state in
         let++ (), state = Heap.store iter_ptr iter_ty iter' state in
         (Enum (1s, [ value ]), state)
       else
@@ -492,11 +476,7 @@ module M (Heap : Heap_intf.S) = struct
     | _ -> Fmt.failwith "deref: unexpected value: %a" pp_rust_val v
 
   let str_len (fun_sig : GAst.fun_sig) ~crate:_ ~args ~state =
-    let str_ptr =
-      match args with
-      | [ Ptr ptr ] -> ptr
-      | _ -> failwith "str_len: unexpected argument"
-    in
+    let str_ptr = as_ptr @@ List.hd args in
     let str_ty =
       match fun_sig.inputs with
       | [ TRef (_, str_ty, _) ] -> str_ty
@@ -504,17 +484,18 @@ module M (Heap : Heap_intf.S) = struct
     in
     let++ str_obj, state = Heap.load str_ptr str_ty state in
     match str_obj with
-    | Struct [ Ptr ptr; _ ] -> (Base (Option.get @@ Sptr.meta ptr), state)
+    | Struct [ Ptr (_, Some meta); _ ] -> (Base meta, state)
     | _ -> failwith "str_len: unexpected string type"
 
   let assert_zero_is_valid (fun_sig : GAst.fun_sig) ~crate:_ ~args:_ ~state =
     let ty =
-      (List.hd fun_sig.generics.trait_clauses).trait.binder_value.decl_generics
-        .types
-      |> List.hd
+      List.hd
+        (List.hd fun_sig.generics.trait_clauses).trait.binder_value
+          .decl_generics
+          .types
     in
-    match ty with
-    | TRef _ -> Heap.error (`Panic "core::intrinsics::assert_zero_valid") state
+    match Layout.zeroed ~null_ptr:Sptr.null_ptr ty with
+    | None -> Heap.error (`Panic "core::intrinsics::assert_zero_valid") state
     | _ -> Result.ok (Tuple [], state)
 
   let size_of (fun_sig : GAst.fun_sig) ~crate:_ ~args:_ ~state =
@@ -524,7 +505,35 @@ module M (Heap : Heap_intf.S) = struct
       |> List.hd
     in
     let+ size = Layout.size_of_s ty in
-    Bfa_symex.Compo_res.Ok (Base size, state)
+    Ok (Base size, state)
+
+  let size_of_val (fun_sig : GAst.fun_sig) ~crate:_ ~args ~state =
+    let ty =
+      match fun_sig.inputs with
+      | [ TRawPtr (ty, _) ] -> ty
+      | _ -> failwith "size_of_val: Invalid input type"
+    in
+    match (ty, args) with
+    | TAdt (TBuiltin TSlice, { types = [ sub_ty ]; _ }), [ Ptr (_, Some meta) ]
+      ->
+        let* len =
+          of_opt_not_impl ~msg:"meta expected int"
+            (Typed.cast_checked meta Typed.t_int)
+        in
+        let+ size = Layout.size_of_s sub_ty in
+        let size = size *@ len in
+        Ok (Base size, state)
+    | TAdt (TBuiltin TStr, _), [ Ptr (_, Some meta) ] ->
+        let+ len =
+          of_opt_not_impl ~msg:"meta expected int"
+            (Typed.cast_checked meta Typed.t_int)
+        in
+        let size = Layout.size_of_int_ty U8 in
+        let size = Typed.int size *@ len in
+        Ok (Base size, state)
+    | ty, _ ->
+        let+ size = Layout.size_of_s ty in
+        Ok (Base size, state)
 
   let min_align_of ~in_input (fun_sig : GAst.fun_sig) ~crate:_ ~args:_ ~state =
     let ty =
@@ -552,10 +561,10 @@ module M (Heap : Heap_intf.S) = struct
     let++ (), state = Heap.store ptr ty v state in
     (Ptr ptr, state)
 
-  let ptr_op op (funsig : GAst.fun_sig) ~crate:_ ~args ~state =
-    let ptr, v =
+  let ptr_op ?(byte = false) op (funsig : GAst.fun_sig) ~crate:_ ~args ~state =
+    let ptr, meta, v =
       match args with
-      | [ Ptr ptr; Base v ] -> (ptr, v)
+      | [ Ptr (ptr, meta); Base v ] -> (ptr, meta, v)
       | _ -> failwith "ptr_add: invalid arguments"
     in
     let v =
@@ -564,13 +573,15 @@ module M (Heap : Heap_intf.S) = struct
       | None -> failwith "ptr_add: invalid offset type"
     in
     let ty =
-      match funsig.inputs with
-      | TRawPtr (ty, _) :: _ -> ty
-      | _ -> failwith "ptr_offset_from: invalid arguments"
+      if byte then Types.TLiteral (TInteger U8)
+      else
+        match funsig.inputs with
+        | TRawPtr (ty, _) :: _ -> ty
+        | _ -> failwith "ptr_offset_from: invalid arguments"
     in
     let v = if op = Add then v else ~-v in
     let ptr' = Sptr.offset ~ty ptr v in
-    if%sat Sptr.constraints ptr' then Result.ok (Ptr ptr', state)
+    if%sat Sptr.constraints ptr' then Result.ok (Ptr (ptr', meta), state)
     else Heap.error `Overflow state
 
   let box_into_raw _ ~crate:_ ~args ~state =
@@ -581,7 +592,7 @@ module M (Heap : Heap_intf.S) = struct
   let ptr_offset_from (funsig : GAst.fun_sig) ~crate:_ ~args ~state =
     let ptr1, ptr2 =
       match args with
-      | [ Ptr ptr1; Ptr ptr2 ] -> (ptr1, ptr2)
+      | [ Ptr (ptr1, _); Ptr (ptr2, _) ] -> (ptr1, ptr2)
       | _ -> failwith "ptr_offset_from: invalid arguments"
     in
     let ty =
@@ -613,11 +624,47 @@ module M (Heap : Heap_intf.S) = struct
         in
         if%sat Typed.conj (constrs v) then Result.ok (Base v, state)
         else Heap.error `UBTransmute state
+    | (TRef _ | TRawPtr _), (TRef _ | TRawPtr _), Ptr _ -> Result.ok (v, state)
     | _ ->
         let ctx = PrintUllbcAst.Crate.crate_to_fmt_env crate in
         Fmt.failwith "Unhandled transmute of %a: %s -> %s" pp_rust_val v
           (PrintTypes.ty_to_string ctx from_ty)
           (PrintTypes.ty_to_string ctx to_ty)
+
+  let copy_nonoverlapping (funsig : GAst.fun_sig) ~crate:_ ~args ~state =
+    let (from_ptr, _), (to_ptr, _), len =
+      match args with
+      | [ Ptr from_ptr; Ptr to_ptr; Base len ] ->
+          (from_ptr, to_ptr, Typed.cast len)
+      | _ -> failwith "copy_nonoverlapping: invalid arguments"
+    in
+    let ty =
+      match funsig.inputs with
+      | TRawPtr (ty, _) :: _ -> ty
+      | _ -> failwith "copy_nonoverlapping: invalid arguments"
+    in
+    let* ty_size = Layout.size_of_s ty in
+    let size = ty_size *@ len in
+    let** () =
+      if%sat Sptr.is_at_null_loc from_ptr ||@ Sptr.is_at_null_loc to_ptr then
+        Heap.error `NullDereference state
+      else
+        (* check for overlap *)
+        let from_ptr_end = Sptr.offset from_ptr size in
+        let to_ptr_end = Sptr.offset to_ptr size in
+        if%sat
+          Sptr.is_same_loc from_ptr to_ptr
+          &&@ (Sptr.distance from_ptr to_ptr_end
+              <@ 0s
+              &&@ (Sptr.distance to_ptr from_ptr_end <@ 0s))
+        then Heap.error (`StdErr "copy_nonoverlapping overlapped") state
+        else Result.ok ()
+    in
+    let++ (), state =
+      Heap.copy_nonoverlapping ~dst:(to_ptr, None) ~src:(from_ptr, None) ~size
+        state
+    in
+    (Tuple [], state)
 
   type std_fun =
     | Any
@@ -628,6 +675,7 @@ module M (Heap : Heap_intf.S) = struct
     | BoolNot
     | BoxIntoRaw
     | Checked of std_op
+    | CopyNonOverlapping
     | Deref
     | DiscriminantValue
     | Eq of std_bool
@@ -637,10 +685,12 @@ module M (Heap : Heap_intf.S) = struct
     | IterNth
     | MinAlignOf of type_loc
     | OptUnwrap
+    | PtrByteOp of std_op
     | PtrOp of std_op
     | PtrOffsetFrom
     | ResUnwrap
     | SizeOf
+    | SizeOfVal
     | SliceLen
     | StrChars
     | StrLen
@@ -667,12 +717,14 @@ module M (Heap : Heap_intf.S) = struct
       ("core::hint::black_box", BlackBox);
       ("core::intrinsics::assert_zero_valid", AssertZeroValid);
       ("core::intrinsics::black_box", BlackBox);
+      ("core::intrinsics::copy_nonoverlapping", CopyNonOverlapping);
       ("core::intrinsics::discriminant_value", DiscriminantValue);
       ("core::intrinsics::min_align_of", MinAlignOf GenArg);
       ("core::intrinsics::min_align_of_val", MinAlignOf Input);
       ("core::intrinsics::pref_align_of", MinAlignOf GenArg);
       ("core::intrinsics::ptr_offset_from", PtrOffsetFrom);
       ("core::intrinsics::size_of", SizeOf);
+      ("core::intrinsics::size_of_val", SizeOfVal);
       ("core::intrinsics::transmute", Transmute);
       ("core::intrinsics::unchecked_add", Unchecked Add);
       ("core::intrinsics::unchecked_div", Unchecked Div);
@@ -704,8 +756,15 @@ module M (Heap : Heap_intf.S) = struct
       ("core::option::{@T}::is_some", IsSome);
       ("core::option::{@T}::unwrap", OptUnwrap);
       ("core::ptr::const_ptr::{@T}::add", PtrOp Add);
+      ("core::ptr::const_ptr::{@T}::byte_add", PtrByteOp Add);
+      ("core::ptr::const_ptr::{@T}::byte_sub", PtrByteOp Sub);
       ("core::ptr::const_ptr::{@T}::offset", PtrOp Add);
       ("core::ptr::const_ptr::{@T}::sub", PtrOp Sub);
+      ("core::ptr::mut_ptr::{@T}::add", PtrOp Add);
+      ("core::ptr::mut_ptr::{@T}::byte_add", PtrByteOp Add);
+      ("core::ptr::mut_ptr::{@T}::byte_sub", PtrByteOp Sub);
+      ("core::ptr::mut_ptr::{@T}::offset", PtrOp Add);
+      ("core::ptr::mut_ptr::{@T}::sub", PtrOp Sub);
       ("core::result::{@T}::unwrap", ResUnwrap);
       ("core::result::{core::cmp::PartialEq}::eq", Eq Id);
       ("core::result::{core::cmp::PartialEq}::ne", Eq Neg);
@@ -734,6 +793,7 @@ module M (Heap : Heap_intf.S) = struct
        | BoolNot -> bool_not f.signature
        | BoxIntoRaw -> box_into_raw f.signature
        | Checked op -> checked_op op f.signature
+       | CopyNonOverlapping -> copy_nonoverlapping f.signature
        | Deref -> deref f.signature
        | DiscriminantValue -> discriminant_value f.signature
        | Eq b -> eq_values ~neg:(b = Neg) f.signature
@@ -743,10 +803,12 @@ module M (Heap : Heap_intf.S) = struct
        | IterNth -> iter_nth f.signature
        | MinAlignOf t -> min_align_of ~in_input:(t = Input) f.signature
        | OptUnwrap -> unwrap_opt f.signature
+       | PtrByteOp op -> ptr_op ~byte:true op f.signature
        | PtrOp op -> ptr_op op f.signature
        | PtrOffsetFrom -> ptr_offset_from f.signature
        | ResUnwrap -> unwrap_res f.signature
        | SizeOf -> size_of f.signature
+       | SizeOfVal -> size_of_val f.signature
        | SliceLen -> slice_len f.signature
        | StrChars -> str_chars f.signature
        | StrLen -> str_len f.signature

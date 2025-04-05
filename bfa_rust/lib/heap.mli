@@ -14,6 +14,3 @@ val iter_vars_serialized :
 
 val subst_serialized :
   (Svalue.Var.t -> Svalue.Var.t) -> serialized -> serialized
-
-val consume : serialized -> t -> (t, 'err, serialized list) Rustsymex.Result.t
-val produce : serialized -> t -> t Rustsymex.t

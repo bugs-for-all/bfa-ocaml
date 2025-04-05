@@ -22,6 +22,17 @@ jobs:
       - name: Setup Z3
         uses: cda-tum/setup-z3@v1
         id: z3
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Setup Charon
+        run: |
+          brew install make
+          cd ..
+          git clone https://github.com/N1ark/charon.git
+          cd charon
+          git checkout monomorphize
+          gmake build-dev-charon-rust
+          echo "$PWD/bin" >> $GITHUB_PATH
       - name: Setup node
         uses: actions/setup-node@v4
       - name: Setup OCaml
@@ -73,4 +84,3 @@ jobs:
         env:
           BFA_Z3_PATH: ./bin/z3
           CERB_INSTALL_PREFIX: .
-

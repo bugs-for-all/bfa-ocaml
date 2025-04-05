@@ -1,0 +1,11 @@
+(install
+ (section
+  (site
+   (bfa-rust kani_lib)))
+ (files
+  (kani/src/lib.rs as kani/src/lib.rs)
+  (kani/Cargo.toml as kani/Cargo.toml)
+  (kani_macros/src/derive.rs as kani_macros/src/derive.rs)
+  (kani_macros/src/lib.rs as kani_macros/src/lib.rs)
+  (kani_macros/Cargo.toml as kani_macros/Cargo.toml))
+ (package bfa-rust))

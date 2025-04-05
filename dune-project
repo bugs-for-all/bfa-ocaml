@@ -4,6 +4,8 @@
 
 (name bfa)
 
+(using dune_site 0.1)
+
 (generate_opam_files)
 
 (license BSD-3-Clause)
@@ -112,12 +114,15 @@
  (name bfa-rust)
  (synopsis "Bugs for All, for Rust.")
  (description "Bugs for All, for Rust.")
+ (sites
+  (share kani_lib))
  (depends
   (ocaml
    (>= 5.3.0))
   (shexp :build)
   eio_main
   bfa
+  dune-site
   zarith
   ppx_deriving
   hashcons

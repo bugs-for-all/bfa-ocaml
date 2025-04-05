@@ -12,6 +12,14 @@ module List_ex = struct
     in
     if List.is_empty errors then Ok oks else Error errors
 
+  let join_options fn opts =
+    let[@tailrec] rec aux acc = function
+      | [] -> Some acc
+      | x :: xs -> (
+          match fn x with Some x -> aux (x :: acc) xs | None -> None)
+    in
+    aux [] opts
+
   let rec combine3 l1 l2 l3 =
     match (l1, l2, l3) with
     | a :: l1, b :: l2, c :: l3 -> (a, b, c) :: combine3 l1 l2 l3

@@ -18,6 +18,7 @@ depends: [
   "shexp" {build}
   "eio_main"
   "bfa"
+  "dune-site"
   "zarith"
   "ppx_deriving"
   "hashcons"
@@ -45,10 +46,12 @@ build: [
     name
     "-j"
     jobs
+    "--promote-install-files=false"
     "@install"
     "@runtest" {with-test}
     "@doc" {with-doc}
   ]
+  ["dune" "install" "-p" name "--create-install-files" name]
 ]
 dev-repo: "git+https://github.com/bugs-for-all/bfa.git"
 pin-depends: [

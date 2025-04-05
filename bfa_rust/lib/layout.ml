@@ -110,12 +110,6 @@ let is_int : Types.ty -> bool = function
   | TLiteral (TInteger _) -> true
   | _ -> false
 
-let to_zeros : Types.literal_type -> T.cval Typed.t = function
-  | TInteger _ -> 0s
-  | t ->
-      Fmt.failwith "to_zeros: unsupported literal type %a" Types.pp_literal_type
-        t
-
 let size_of_int_ty : Types.integer_type -> int = function
   | I128 | U128 -> 16
   | I64 | U64 -> 8
@@ -168,10 +162,6 @@ let rec layout_of (ty : Types.ty) : layout =
   | TAdt (TBuiltin TBox, _) | TRef (_, _, _) | TRawPtr (_, _) ->
       { size = Archi.word_size; align = Archi.word_size; members_ofs = [||] }
   (* Tuples *)
-  | TAdt (TTuple, { types = []; _ }) ->
-      (* unit () *)
-      (* TODO: this actually has size 0, which makes things... awkward *)
-      { size = 1; align = 1; members_ofs = [||] }
   | TAdt (TTuple, { types; _ }) -> layout_of_members types
   (* Custom ADTs (struct, enum, etc.) *)
   | TAdt (TAdtId id, _) -> (
@@ -202,7 +192,7 @@ let rec layout_of (ty : Types.ty) : layout =
       let members_ofs = Array.init size (fun i -> i * sub_layout.size) in
       { size = size * sub_layout.size; align = sub_layout.align; members_ofs }
   (* Never -- zero sized type *)
-  | TNever -> { size = 0; align = 0; members_ofs = [||] }
+  | TNever -> { size = 0; align = 1; members_ofs = [||] }
   (* Others (unhandled for now) *)
   | TAdt (TBuiltin TStr, _) -> raise (CantComputeLayout ("String", ty))
   | TVar _ -> raise (CantComputeLayout ("De Bruijn variable", ty))
@@ -404,3 +394,39 @@ let rec nondet : Types.ty -> 'a rust_val Rustsymex.t =
       Tuple fields
   | ty ->
       Rustsymex.not_impl (Fmt.str "nondet: unsupported type %a" Types.pp_ty ty)
+
+let zeroed_lit : Types.literal_type -> T.cval Typed.t = function
+  | TInteger _ | TBool | TChar -> 0s
+  | t ->
+      Fmt.failwith "to_zeros: unsupported literal type %a" Types.pp_literal_type
+        t
+
+let rec zeroed ~(null_ptr : 'a) : Types.ty -> 'a rust_val option = function
+  | TLiteral lit_ty -> ( try Some (Base (zeroed_lit lit_ty)) with _ -> None)
+  | TRawPtr _ -> Some (Ptr (null_ptr, None))
+  | TRef _ -> None
+  | TAdt (TTuple, { types; _ }) ->
+      Utils_.List_ex.join_options (zeroed ~null_ptr) types
+      |> Option.map (fun fields -> Tuple fields)
+  | TAdt (TAdtId t_id, _) -> (
+      let adt = Session.get_adt t_id in
+      match adt.kind with
+      | Struct fields ->
+          fields
+          |> Utils_.List_ex.join_options (fun (f : Types.field) ->
+                 zeroed ~null_ptr f.field_ty)
+          |> Option.map (fun fields -> Struct fields)
+      | Enum vars ->
+          (vars
+          |> List.find_opt (fun (v : Types.variant) ->
+                 Z.equal Z.zero v.discriminant.value)
+          |> Option.bind)
+          @@ fun (v : Types.variant) ->
+          v.fields
+          |> Utils_.List_ex.join_options (fun (f : Types.field) ->
+                 zeroed ~null_ptr f.field_ty)
+          |> Option.map (fun fs -> Enum (value_of_scalar v.discriminant, fs))
+      | k ->
+          Fmt.failwith "Unhandled zeroed ADT kind: %a" Types.pp_type_decl_kind k
+      )
+  | ty -> Fmt.failwith "Unhandled zeroed type: %a" Types.pp_ty ty
