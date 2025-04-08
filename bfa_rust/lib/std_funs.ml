@@ -32,6 +32,19 @@ module M (Heap : Heap_intf.S) = struct
           if%sat y ==@ 0s then Heap.error `DivisionByZero st
           else Result.ok (Typed.rem x (Typed.cast y))
 
+  let fop_of = function
+    | Add -> fun x y _ -> Result.ok (x +.@ y)
+    | Sub -> fun x y _ -> Result.ok (x -.@ y)
+    | Mul -> fun x y _ -> Result.ok (x *.@ y)
+    | Div ->
+        fun x y st ->
+          if%sat y ==@ Typed.float_like y 0.0 then Heap.error `DivisionByZero st
+          else Result.ok (x /.@ Typed.cast y)
+    | Rem ->
+        fun x y st ->
+          if%sat y ==@ Typed.float_like y 0.0 then Heap.error `DivisionByZero st
+          else Result.ok (Typed.rem x (Typed.cast y))
+
   let assert_ _ ~crate:_ ~(args : rust_val list) ~state =
     let open Typed.Infix in
     let* to_assert =
@@ -66,27 +79,33 @@ module M (Heap : Heap_intf.S) = struct
     | Some v -> Result.ok v
     | None -> Heap.error `UBPointerArithmetic st
 
-  let safe_binop (bop : std_op) l r ty st =
-    let* constrs =
-      of_opt_not_impl ~msg:"constraints not implemented" (Layout.constraints ty)
-    in
-    let** l = cast_to_int l st in
-    let** r = cast_to_int r st in
-    let** res = (op_of bop) l r st in
-    let** () =
-      (* additional check for rem, since the result doesn't directly overflow *)
-      if bop = Rem then
-        let* min =
-          match ty with
-          | TInteger inty -> return (Layout.min_value inty)
-          | _ -> not_impl "Unexpected type in rem"
+  let safe_binop (bop : std_op) (l : T.cval Typed.t) (r : T.cval Typed.t) ty st
+      : (T.cval Typed.t, 'e, 'm) Result.t =
+    match (Typed.get_ty l, Typed.get_ty r) with
+    | TInt, TInt ->
+        let constrs = Layout.constraints ty in
+        let** res = (op_of bop) (Typed.cast l) (Typed.cast r) st in
+        let** () =
+          (* additional check for rem, since the result doesn't directly overflow *)
+          if bop = Rem then
+            let min =
+              match ty with
+              | TInteger inty -> Layout.min_value inty
+              | _ -> failwith "Unexpected type in rem"
+            in
+            if%sat l ==@ min &&@ (r ==@ -1s) then Heap.error `Overflow st
+            else Result.ok ()
+          else Result.ok ()
         in
-        if%sat l ==@ min &&@ (r ==@ -1s) then Heap.error `Overflow st
-        else Result.ok ()
-      else Result.ok ()
-    in
-    if%sat Typed.conj @@ constrs res then Result.ok res
-    else Heap.error `Overflow st
+        if%sat Typed.conj @@ constrs res then Result.ok (res :> T.cval Typed.t)
+        else Heap.error `Overflow st
+    | TFloat _, TFloat _ ->
+        let constrs = Layout.constraints ty in
+        let** res = (fop_of bop) (Typed.cast l) (Typed.cast r) st in
+        if%sat Typed.conj @@ constrs res then Result.ok (res :> T.cval Typed.t)
+        else Heap.error `Overflow st
+    | TPointer, _ | _, TPointer -> Heap.error `UBPointerArithmetic st
+    | _ -> not_impl "Unexpected type in safe_binop"
 
   let unchecked_op op (fun_sig : UllbcAst.fun_sig) ~crate:_ ~args ~state =
     let* ty =
@@ -619,9 +638,7 @@ module M (Heap : Heap_intf.S) = struct
     let v = List.hd args in
     match (from_ty, to_ty, v) with
     | TLiteral _, TLiteral to_ty, Base v ->
-        let* constrs =
-          of_opt_not_impl ~msg:"Constraints missing" (Layout.constraints to_ty)
-        in
+        let constrs = Layout.constraints to_ty in
         if%sat Typed.conj (constrs v) then Result.ok (Base v, state)
         else Heap.error `UBTransmute state
     | (TRef _ | TRawPtr _), (TRef _ | TRawPtr _), Ptr _ -> Result.ok (v, state)
@@ -666,11 +683,27 @@ module M (Heap : Heap_intf.S) = struct
     in
     (Tuple [], state)
 
+  let mul_add _ ~crate:_ ~args ~state =
+    match args with
+    | [ Base a; Base b; Base c ] ->
+        let a, b, c = (Typed.cast a, Typed.cast b, Typed.cast c) in
+        Result.ok (Base ((a *@ b) +@ c), state)
+    | _ -> failwith "mul_add expects three arguments"
+
+  let abs _ ~crate:_ ~args ~state =
+    match args with
+    | [ Base v ] ->
+        Result.ok (Base (Typed.cast @@ Typed.abs @@ Typed.cast v), state)
+    | _ -> failwith "abs expects one argument"
+
   type std_fun =
-    | Any
+    (* Kani *)
     | Assert
-    | AssertZeroValid
     | Assume
+    | Any
+    (* Std *)
+    | Abs
+    | AssertZeroValid
     | BlackBox
     | BoolNot
     | BoxIntoRaw
@@ -684,6 +717,7 @@ module M (Heap : Heap_intf.S) = struct
     | IsSome
     | IterNth
     | MinAlignOf of type_loc
+    | MulAdd
     | OptUnwrap
     | PtrByteOp of std_op
     | PtrOp of std_op
@@ -719,6 +753,10 @@ module M (Heap : Heap_intf.S) = struct
       ("core::intrinsics::black_box", BlackBox);
       ("core::intrinsics::copy_nonoverlapping", CopyNonOverlapping);
       ("core::intrinsics::discriminant_value", DiscriminantValue);
+      ("core::intrinsics::fabsf64", Abs);
+      ("core::intrinsics::fabsf32", Abs);
+      ("core::intrinsics::fmaf64", MulAdd);
+      ("core::intrinsics::fmaf32", MulAdd);
       ("core::intrinsics::min_align_of", MinAlignOf GenArg);
       ("core::intrinsics::min_align_of_val", MinAlignOf Input);
       ("core::intrinsics::pref_align_of", MinAlignOf GenArg);
@@ -785,6 +823,7 @@ module M (Heap : Heap_intf.S) = struct
     let ctx = NameMatcher.ctx_from_crate crate in
     NameMatcherMap.find_opt ctx match_config f.item_meta.name std_fun_map
     |> Option.map @@ function
+       | Abs -> abs f.signature
        | Any -> nondet f.signature
        | Assert -> assert_ f.signature
        | AssertZeroValid -> assert_zero_is_valid f.signature
@@ -802,6 +841,7 @@ module M (Heap : Heap_intf.S) = struct
        | IsSome -> is_some f.signature
        | IterNth -> iter_nth f.signature
        | MinAlignOf t -> min_align_of ~in_input:(t = Input) f.signature
+       | MulAdd -> mul_add f.signature
        | OptUnwrap -> unwrap_opt f.signature
        | PtrByteOp op -> ptr_op ~byte:true op f.signature
        | PtrOp op -> ptr_op op f.signature

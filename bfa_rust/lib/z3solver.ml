@@ -50,12 +50,16 @@ let log_sexp sexp =
   | None -> ()
   | Some oc -> Sexplib.Sexp.output_hum oc sexp
 
-let log_response response =
+let log_response response elapsed =
   match !smt_log_file with
   | None -> ()
   | Some oc ->
       output_string oc " ; -> ";
       Sexplib.Sexp.output_hum oc response;
+      if elapsed > 0 then (
+        output_string oc " (";
+        output_string oc (string_of_int elapsed);
+        output_string oc "ms)");
       output_char oc '\n';
       flush oc
 
@@ -69,8 +73,10 @@ let z3_solver () =
   let solver = new_solver solver_config in
   let command sexp =
     log_sexp sexp;
+    let now = Unix.gettimeofday () in
     let res = solver.command sexp in
-    log_response res;
+    let elapsed = Int.of_float ((Unix.gettimeofday () -. now) *. 1000.) in
+    log_response res elapsed;
     res
   in
   { solver with command }
@@ -228,6 +234,10 @@ let rec sort_of_ty = function
   | Svalue.TBool -> Simple_smt.t_bool
   | TInt -> Simple_smt.t_int
   | TLoc -> Simple_smt.t_int
+  | TFloat F16 -> Z3floats.t_f16
+  | TFloat F32 -> Z3floats.t_f32
+  | TFloat F64 -> Z3floats.t_f64
+  | TFloat F128 -> Z3floats.t_f128
   | TSeq ty -> t_seq $ sort_of_ty ty
   | TPointer -> t_ptr
 
@@ -249,6 +259,13 @@ let rec encode_value (v : Svalue.t) =
   match v.node.kind with
   | Var v -> atom (Svalue.Var.to_string v)
   | Int z -> int_zk z
+  | Float f -> (
+      match v.node.ty with
+      | TFloat F16 -> Z3floats.f16_k f
+      | TFloat F32 -> Z3floats.f32_k f
+      | TFloat F64 -> Z3floats.f64_k f
+      | TFloat F128 -> Z3floats.f128_k f
+      | _ -> failwith "Non-float type given")
   | Bool b -> bool_k b
   | Ptr (l, o) -> mk_ptr (encode_value_memo l) (encode_value_memo o)
   | Seq vs -> (
@@ -256,28 +273,50 @@ let rec encode_value (v : Svalue.t) =
       | [] -> failwith "need type to encode empty lists"
       | _ :: _ ->
           List.map (fun v -> seq_singl (encode_value_memo v)) vs |> seq_concat)
-  | Unop (unop, v) -> (
-      let v = encode_value_memo v in
+  | Unop (unop, v1_) -> (
+      let v1 = encode_value_memo v1_ in
       match unop with
-      | Not -> bool_not v
-      | GetPtrLoc -> get_loc v
-      | GetPtrOfs -> get_ofs v
-      | IntOfBool -> ite v (int_k 1) (int_k 0))
+      | Not -> bool_not v1
+      | GetPtrLoc -> get_loc v1
+      | GetPtrOfs -> get_ofs v1
+      | IntOfBool -> ite v1 (int_k 1) (int_k 0)
+      | Abs ->
+          let ty = v1_.node.ty in
+          if Svalue.is_float ty then Z3floats.fp_abs v1
+          else ite (num_lt v1 (int_k 0)) (num_neg v1) v1
+      | FloatOfInt -> (
+          match v.node.ty with
+          | TFloat F16 -> Z3floats.f16_of_int v1
+          | TFloat F32 -> Z3floats.f32_of_int v1
+          | TFloat F64 -> Z3floats.f64_of_int v1
+          | TFloat F128 -> Z3floats.f128_of_int v1
+          | _ -> failwith "Non-float type given")
+      | IntOfFloat -> (
+          match v1_.node.ty with
+          | TFloat F16 -> Z3floats.int_of_f16 v1
+          | TFloat F32 -> Z3floats.int_of_f32 v1
+          | TFloat F64 -> Z3floats.int_of_f64 v1
+          | TFloat F128 -> Z3floats.int_of_f128 v1
+          | _ -> failwith "Non-float type given"))
   | Binop (binop, v1, v2) -> (
+      let ty = v1.node.ty in
       let v1 = encode_value_memo v1 in
       let v2 = encode_value_memo v2 in
       match binop with
       | Eq -> eq v1 v2
-      | Leq -> num_leq v1 v2
-      | Lt -> num_lt v1 v2
+      | Leq -> (if Svalue.is_float ty then Z3floats.fp_leq else num_leq) v1 v2
+      | Lt -> (if Svalue.is_float ty then Z3floats.fp_lt else num_lt) v1 v2
       | And -> bool_and v1 v2
       | Or -> bool_or v1 v2
-      | Plus -> num_add v1 v2
-      | Minus -> num_sub v1 v2
-      | Times -> num_mul v1 v2
-      | Div -> num_div v1 v2
-      | Rem -> num_rem v1 v2
-      | Mod -> num_mod v1 v2)
+      | Plus -> (if Svalue.is_float ty then Z3floats.fp_add else num_add) v1 v2
+      | Minus -> (if Svalue.is_float ty then Z3floats.fp_sub else num_sub) v1 v2
+      | Times -> (if Svalue.is_float ty then Z3floats.fp_mul else num_mul) v1 v2
+      | Div -> (if Svalue.is_float ty then Z3floats.fp_div else num_div) v1 v2
+      | Rem -> (if Svalue.is_float ty then Z3floats.fp_rem else num_rem) v1 v2
+      | Mod ->
+          if Svalue.is_float ty then
+            failwith "mod not implemented for floating points"
+          else num_mod v1 v2)
   | Nop (Distinct, vs) ->
       let vs = List.map encode_value_memo vs in
       distinct vs

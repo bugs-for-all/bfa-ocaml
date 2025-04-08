@@ -107,8 +107,9 @@ module Node = struct
     | Owned { v = Init { value; ty = tyw }; _ } -> (
         if Values.equal_literal_type ty tyw then Result.ok value
         else
-          match (Layout.constraints ty, value) with
-          | Some constrs, Base cval ->
+          match value with
+          | Base cval ->
+              let constrs = Layout.constraints ty in
               if%sat Typed.conj (constrs cval) then Result.ok value
               else Result.error `UBTransmute
           | _ ->

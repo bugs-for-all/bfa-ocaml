@@ -31,12 +31,14 @@ function rainbow() {
 
 
 # Build Rusteria
-eval $(opam env)
-dune build
-if [ $? -ne 0 ]; then
-    echo -e "${RED}${BOLD}Failed to build Rusteria!"
-    exit 1
-fi
+function build_rusteria() {
+    eval $(opam env)
+    dune build
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}${BOLD}Failed to build Rusteria!"
+        exit 1
+    fi
+}
 
 # If on MacOS, use coreutils:
 shopt -s expand_aliases

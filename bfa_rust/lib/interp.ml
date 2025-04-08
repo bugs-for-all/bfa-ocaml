@@ -28,6 +28,13 @@ module Make (Heap : Heap_intf.S) = struct
         Fmt.kstr Rustsymex.not_impl "Failed to cast %a to %a" Typed.ppa x
           Typed.ppa_ty ty
 
+  let cast_checked2 x y =
+    match Typed.cast_checked2 x y with
+    | Some x -> Rustsymex.return x
+    | None ->
+        Fmt.kstr Rustsymex.not_impl "Values %a and %a have mismatched types"
+          Typed.ppa x Typed.ppa y
+
   type 'err fun_exec =
     crate:UllbcAst.crate ->
     args:Sptr.t rust_val list ->
@@ -86,6 +93,14 @@ module Make (Heap : Heap_intf.S) = struct
     | CLiteral (VBool b) ->
         Result.ok (Base (if b then Typed.one else Typed.zero), state)
     | CLiteral (VChar c) -> Result.ok (Base (Typed.int (Char.code c)), state)
+    | CLiteral (VFloat { float_value; float_ty = F16 }) ->
+        Result.ok (Base (Typed.f16 @@ Float.of_string float_value), state)
+    | CLiteral (VFloat { float_value; float_ty = F32 }) ->
+        Result.ok (Base (Typed.f32 @@ Float.of_string float_value), state)
+    | CLiteral (VFloat { float_value; float_ty = F64 }) ->
+        Result.ok (Base (Typed.f64 @@ Float.of_string float_value), state)
+    | CLiteral (VFloat { float_value; float_ty = F128 }) ->
+        Result.ok (Base (Typed.f128 @@ Float.of_string float_value), state)
     | CLiteral (VStr str) -> (
         let** ptr_opt, state = Heap.load_str_global str state in
         match ptr_opt with
@@ -158,7 +173,7 @@ module Make (Heap : Heap_intf.S) = struct
   let rec equality_check ~state (v1 : [< Typed.T.cval ] Typed.t)
       (v2 : [< Typed.T.cval ] Typed.t) =
     match (Typed.get_ty v1, Typed.get_ty v2) with
-    | TInt, TInt | TPointer, TPointer ->
+    | TInt, TInt | TPointer, TPointer | TFloat _, TFloat _ ->
         Result.ok (v1 ==@ v2 |> Typed.int_of_bool, state)
     | TPointer, TInt ->
         let v2 : T.sint Typed.t = Typed.cast v2 in
@@ -274,6 +289,17 @@ module Make (Heap : Heap_intf.S) = struct
             match (from_ty, to_ty) with
             | TRawPtr _, TLiteral (TInteger Usize) -> Result.ok (v, state)
             | TRef _, TRef _ -> Result.ok (v, state)
+            | TLiteral (TFloat _), TLiteral (TInteger _) ->
+                let v =
+                  match v with
+                  | Base v -> (
+                      match Typed.get_ty v with
+                      | Svalue.TFloat _ -> Typed.cast v
+                      | _ -> failwith "Unsupported: invalid value in cast")
+                  | _ -> failwith "Unsupported: invalid value in cast"
+                in
+                let v' = Typed.int_of_float v in
+                Result.ok (Base v', state)
             | _ ->
                 Fmt.kstr not_impl "Unsupported transmutation, from %a to %a"
                   Types.pp_ty from_ty Types.pp_ty to_ty)
@@ -305,6 +331,17 @@ module Make (Heap : Heap_intf.S) = struct
             else
               not_impl
                 "Unsupported: integer cast with different signedness and sign"
+        | Cast (CastScalar (TInteger _, TFloat to_ty)) ->
+            let v = as_base_of ~ty:Typed.t_int v in
+            let fp : Svalue.FloatPrecision.t =
+              match to_ty with
+              | F16 -> F16
+              | F32 -> F32
+              | F64 -> F64
+              | F128 -> F128
+            in
+            let v' = Typed.float_of_int fp v in
+            Result.ok (Base v', state)
         | Cast
             (CastUnsize
                ( TAdt
@@ -338,23 +375,21 @@ module Make (Heap : Heap_intf.S) = struct
         in
         let++ res, state =
           match op with
-          | Ge ->
-              (* TODO: comparison operators for pointers *)
-              let* v1 = cast_checked v1 ~ty:Typed.t_int in
-              let* v2 = cast_checked v2 ~ty:Typed.t_int in
-              Result.ok (v1 >=@ v2 |> Typed.int_of_bool, state)
-          | Gt ->
-              let* v1 = cast_checked v1 ~ty:Typed.t_int in
-              let* v2 = cast_checked v2 ~ty:Typed.t_int in
-              Result.ok (v1 >@ v2 |> Typed.int_of_bool, state)
-          | Lt ->
-              let* v1 = cast_checked v1 ~ty:Typed.t_int in
-              let* v2 = cast_checked v2 ~ty:Typed.t_int in
-              Result.ok (v1 <@ v2 |> Typed.int_of_bool, state)
-          | Le ->
-              let* v1 = cast_checked v1 ~ty:Typed.t_int in
-              let* v2 = cast_checked v2 ~ty:Typed.t_int in
-              Result.ok (v1 <=@ v2 |> Typed.int_of_bool, state)
+          | Ge | Gt | Lt | Le ->
+              let op =
+                match op with
+                | Ge -> Typed.geq
+                | Gt -> Typed.gt
+                | Lt -> Typed.lt
+                | Le -> Typed.leq
+                | _ -> assert false
+              in
+              let* v1, v2, ty = cast_checked2 v1 v2 in
+              if ty = Typed.t_ptr then Heap.error `UBPointerComparison state
+              else
+                Result.ok
+                  ( op (Typed.cast v1) (Typed.cast v2) |> Typed.int_of_bool,
+                    state )
           | Eq ->
               let v1 = Typed.cast v1 in
               let v2 = Typed.cast v2 in

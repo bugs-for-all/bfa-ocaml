@@ -18,6 +18,7 @@ let () =
     (Extension_name.to_string Sat1)
     ~extensions:[ ext Sat1 ]
 
+(* Register [0s], [1s] etc. *)
 let () =
   let open Ppx_symex_expander.Sym_constants in
   let kind = Context_free.Rule.Constant_kind.Integer in

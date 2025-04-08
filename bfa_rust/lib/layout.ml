@@ -296,24 +296,21 @@ let int_constraints ty =
   fun x -> [ min <=@ x; x <=@ max ]
 
 let constraints :
-    Types.literal_type -> (T.cval Typed.t -> T.sbool Typed.t list) option =
-  function
-  | TInteger ity ->
+    Types.literal_type -> [< T.cval ] Typed.t -> T.sbool Typed.t list = function
+  | TInteger ity -> (
       let constrs = int_constraints ity in
-      Some
-        (fun x ->
-          match Typed.cast_checked x Typed.t_int with
-          | None -> [ Typed.v_false ]
-          | Some x -> constrs x)
-  | TBool ->
-      Some
-        (fun x ->
-          match Typed.cast_checked x Typed.t_int with
-          | None -> [ Typed.v_false ]
-          (* Maybe worth checking which of these is better (if it matters at all)
+      fun x ->
+        match Typed.cast_checked x Typed.t_int with
+        | None -> [ Typed.v_false ]
+        | Some x -> constrs x)
+  | TBool -> (
+      fun x ->
+        match Typed.cast_checked x Typed.t_int with
+        | None -> [ Typed.v_false ]
+        (* Maybe worth checking which of these is better (if it matters at all)
           | Some x -> [ x ==@ 0s ||@ (x ==@ 1s) ]) *)
-          | Some x -> [ 0s <=@ x; x <=@ 1s ])
-  | TChar ->
+        | Some x -> [ 0s <=@ x; x <=@ 1s ])
+  | TChar -> (
       (* A char is a ‘Unicode scalar value’, which is any ‘Unicode code point’ other than
        a surrogate code point. This has a fixed numerical definition: code points are in
        the range 0 to 0x10FFFF, inclusive. Surrogate code points, used by UTF-16, are in
@@ -323,30 +320,28 @@ let constraints :
       let codepoint_max = Typed.int 0x10FFFF in
       let surrogate_min = Typed.int 0xD800 in
       let surrogate_max = Typed.int 0xDFFF in
-      Some
-        (fun x ->
-          match Typed.cast_checked x Typed.t_int with
-          | None -> [ Typed.v_false ]
-          | Some x ->
-              [
-                codepoint_min <=@ x;
-                x <=@ codepoint_max;
-                Typed.not (surrogate_min <=@ x &&@ (x <=@ surrogate_max));
-              ])
-  | ty ->
-      L.info (fun m ->
-          m "No constraints implemented for type %a" Types.pp_literal_type ty);
-      None
+      fun x ->
+        match Typed.cast_checked x Typed.t_int with
+        | None -> [ Typed.v_false ]
+        | Some x ->
+            [
+              codepoint_min <=@ x;
+              x <=@ codepoint_max;
+              Typed.not (surrogate_min <=@ x &&@ (x <=@ surrogate_max));
+            ])
+  | TFloat (F16 | F32 | F64 | F128) -> fun _ -> []
 
-let nondet_literal_ty : Types.literal_type -> T.cval Typed.t Rustsymex.t =
-  function
-  | (TInteger _ | TBool | TChar) as ty ->
-      let constrs = Option.get @@ constraints ty in
-      Rustsymex.nondet ~constrs Typed.t_int
-  | ty ->
-      Rustsymex.not_impl
-        (Fmt.str "nondet_literal_ty: unsupported type %a" Types.pp_literal_type
-           ty)
+let nondet_literal_ty (ty : Types.literal_type) : T.cval Typed.t Rustsymex.t =
+  let rty =
+    match ty with
+    | TInteger _ | TBool | TChar -> Typed.t_int
+    | TFloat F16 -> Typed.t_f16
+    | TFloat F32 -> Typed.t_f32
+    | TFloat F64 -> Typed.t_f64
+    | TFloat F128 -> Typed.t_f128
+  in
+  let constrs = constraints ty in
+  Rustsymex.nondet ~constrs rty
 
 let rec nondet : Types.ty -> 'a rust_val Rustsymex.t =
   let open Rustsymex.Syntax in
@@ -397,9 +392,10 @@ let rec nondet : Types.ty -> 'a rust_val Rustsymex.t =
 
 let zeroed_lit : Types.literal_type -> T.cval Typed.t = function
   | TInteger _ | TBool | TChar -> 0s
-  | t ->
-      Fmt.failwith "to_zeros: unsupported literal type %a" Types.pp_literal_type
-        t
+  | TFloat F16 -> Typed.f16 0.0
+  | TFloat F32 -> Typed.f32 0.0
+  | TFloat F64 -> Typed.f64 0.0
+  | TFloat F128 -> Typed.f128 0.0
 
 let rec zeroed ~(null_ptr : 'a) : Types.ty -> 'a rust_val option = function
   | TLiteral lit_ty -> ( try Some (Base (zeroed_lit lit_ty)) with _ -> None)
