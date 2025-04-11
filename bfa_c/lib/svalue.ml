@@ -135,7 +135,7 @@ let rec subst subst_var sv =
         List.map
           (fun sv ->
             let new_sv = subst subst_var sv in
-            if equal new_sv sv then changed := true;
+            if not (equal new_sv sv) then changed := true;
             new_sv)
           l
       in
@@ -153,7 +153,7 @@ let rec subst subst_var sv =
         List.map
           (fun sv ->
             let new_sv = subst subst_var sv in
-            if equal new_sv sv then changed := true;
+            if not (equal new_sv sv) then changed := true;
             new_sv)
           l
       in
