@@ -169,13 +169,13 @@
 
 (pin
  (url
-  "git+https://github.com/giltho/linol#aae7605aff26d1a5c64f3aa4e46d2a447f5c74eb")
+  "git+https://github.com/c-cube/linol#fc691e0abdc8700c9370905578f6381727d494fa")
  (package
   (name linol)))
 
 (pin
  (url
-  "git+https://github.com/giltho/linol#aae7605aff26d1a5c64f3aa4e46d2a447f5c74eb")
+  "git+https://github.com/c-cube/linol#fc691e0abdc8700c9370905578f6381727d494fa")
  (package
   (name linol-eio)))
 
