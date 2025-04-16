@@ -69,10 +69,8 @@
   fmt
   logs
   printbox-text
-  (linol
-   (>= 0.8))
-  (linol-eio
-   (>= 0.8))
+  linol
+  linol-eio
   (odoc :with-doc)
   (alcotest :with-test)
   (dune
@@ -133,10 +131,6 @@
   unionFind
   name_matcher_parser
   charon
-  (linol
-   (>= 0.8))
-  (linol-eio
-   (>= 0.8))
   (odoc :with-doc)
   (alcotest :with-test)
   (dune
@@ -148,3 +142,63 @@
     :with-dev-detup
     (= 0.27.0)))
   (ocaml-lsp-server :with-dev-setup)))
+
+(pin
+ (url
+  "git+https://github.com/NatKarmios/simple-smt-ocaml#9db7ef0bb61a76010de255af3cbe4066dd8dd622")
+ (package
+  (name simple_smt)))
+
+(pin
+ (url
+  "git+https://github.com/N1ark/charon#f47e331b9bc770852a9bcec7d51957f296ae4f1e")
+ (package
+  (name charon)))
+
+(pin
+ (url
+  "git+https://github.com/N1ark/visitors#530a469d0960ec8e68037267d52ca763a7ffedcf")
+ (package
+  (name visitors)))
+
+(pin
+ (url
+  "git+https://github.com/giltho/cerberus#482e660d59c951c0bd9a0c89c0f890ad00a078c2")
+ (package
+  (name cerberus-lib)))
+
+(pin
+ (url
+  "git+https://github.com/c-cube/linol#fc691e0abdc8700c9370905578f6381727d494fa")
+ (package
+  (name linol)))
+
+(pin
+ (url
+  "git+https://github.com/c-cube/linol#fc691e0abdc8700c9370905578f6381727d494fa")
+ (package
+  (name linol-eio)))
+
+(pin
+ (url
+  "git+https://github.com/N1ark/charon#f47e331b9bc770852a9bcec7d51957f296ae4f1e")
+ (package
+  (name name_matcher_parser)))
+
+(pin
+ (url
+  "git+https://github.com/giltho/vscode-ocaml-platform#6e83e72c7ea71fbecbabaaf36056d20bbbdcfff4")
+ (package
+  (name vscode)))
+
+(pin
+ (url
+  "git+https://github.com/giltho/vscode-ocaml-platform#6e83e72c7ea71fbecbabaaf36056d20bbbdcfff4")
+ (package
+  (name vscode-node)))
+
+(pin
+ (url
+  "git+https://github.com/giltho/vscode-ocaml-platform#6e83e72c7ea71fbecbabaaf36056d20bbbdcfff4")
+ (package
+  (name vscode-interop)))
