@@ -1,7 +1,7 @@
 (library
  (public_name soteria.soteria_symex)
  (name soteria_symex)
- (libraries soteria_std simple_smt fmt logs iter)
+ (libraries soteria_std simple_smt fmt logs logs.fmt fmt.tty iter)
  (flags :standard -open Soteria_std)
  (preprocess
   (pps ppx_symex ppx_deriving.std)))

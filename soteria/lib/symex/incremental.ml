@@ -1,7 +1,20 @@
-module type Mutable = sig
+module type Immutable = sig
+  type init_data
   type t
 
-  val init : unit -> t
+  (** Initialisation can be side-effectful *)
+  val init : init_data -> t
+
+  val backtrack_n : t -> int -> t
+  val save : t -> t
+  val reset : t -> t
+end
+
+module type Mutable = sig
+  type init_data
+  type t
+
+  val init : init_data -> t
   val backtrack_n : t -> int -> unit
   val save : t -> unit
   val reset : t -> unit
@@ -12,11 +25,12 @@ module Make_mutable (M : sig
 
   val default : t
 end) : sig
-  include Mutable with type t = M.t Dynarray.t
+  include Mutable with type t = M.t Dynarray.t with type init_data = unit
 
   val wrap : (M.t -> 'a * M.t) -> t -> 'a
   val wrap_read : (M.t -> 'a) -> t -> 'a
 end = struct
+  type init_data = unit
   type t = M.t Dynarray.t
 
   let init () =
@@ -51,7 +65,7 @@ module type In_place = sig
   val reset : unit -> unit
 end
 
-module Mutable_to_in_place (M : Mutable) = struct
+module Mutable_to_in_place (M : Mutable with type init_data = unit) = struct
   let state = lazy (M.init ())
   let save () = M.save (Lazy.force state)
   let backtrack_n n = M.backtrack_n (Lazy.force state) n
@@ -70,13 +84,4 @@ struct
 
   let wrap_read f () = wrap (Mutable.wrap_read f) ()
   let wrap f () = wrap (Mutable.wrap f) ()
-end
-
-module type Immutable = sig
-  type t
-
-  val init : t
-  val backtrack_n : t -> int -> t
-  val save : t -> t
-  val reset : t -> t
 end

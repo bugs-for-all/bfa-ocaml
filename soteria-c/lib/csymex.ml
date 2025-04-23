@@ -2,6 +2,8 @@ module SYMEX =
   Soteria_symex.Symex.Make_iter
     (struct
       let fuel : Soteria_symex.Fuel_gauge.t = { steps = 150; branching = 4 }
+
+      module Logger = Soteria_symex.Logging.Fmt_log_reporter
     end)
     (Z3solver)
 

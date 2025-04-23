@@ -2,6 +2,8 @@ module List = ListLabels
 
 module type Config = sig
   val fuel : Fuel_gauge.t
+
+  module Logger : Logging.Symex_log_reporter
 end
 
 module type Base = sig

@@ -1,0 +1,4 @@
+(library
+ (name soteria_html_logs)
+ (public_name soteria-html-logs)
+ (libraries soteria.soteria_symex logs htmlit))

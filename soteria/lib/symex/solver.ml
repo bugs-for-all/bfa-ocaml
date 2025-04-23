@@ -1,7 +1,7 @@
 module type Mutable_incremental = sig
   (** This module represents a solver state, it is fully imperative! *)
 
-  include Incremental.Mutable
+  include Incremental.Mutable with type init_data := unit
   module Value : Value.S
 
   type sbool_v := Value.sbool Value.t
@@ -37,7 +37,12 @@ module type In_place_incremental = sig
 end
 
 module Mutable_to_in_place (M : Mutable_incremental) = struct
-  include Incremental.Mutable_to_in_place (M)
+  include Incremental.Mutable_to_in_place (struct
+    include M
+
+    type init_data = unit
+  end)
+
   module Value = M.Value
 
   let add_constraints ?simplified vs =

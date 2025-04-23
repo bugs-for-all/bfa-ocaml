@@ -86,6 +86,19 @@
   (ocaml-lsp-server :with-dev-setup)))
 
 (package
+ (name soteria-html-logs)
+ (depends
+  (ocaml
+   (>= 5.3.0))
+  (dune
+   (and
+    :build
+    (>= 3.14.0)))
+  logs
+  htmlit
+  soteria))
+
+(package
  (name soteria-vscode)
  (allow_empty)
  (synopsis "VSCode extension for Soteria-C")

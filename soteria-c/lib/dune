@@ -6,6 +6,7 @@
  (libraries
   soteria.std
   soteria.soteria_symex
+  soteria-html-logs
   cmdliner
   fmt
   logs

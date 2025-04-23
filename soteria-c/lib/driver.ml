@@ -4,12 +4,6 @@ module Wpst_interp = Interp.Make (SState)
 
 let ( let@ ) = ( @@ )
 
-let setup_console_log level =
-  Fmt_tty.setup_std_outputs ();
-  Logs.set_level level;
-  Logs.set_reporter (Logs_fmt.reporter ());
-  ()
-
 let setup_stderr_log ~log_lsp level =
   Logs.set_level level;
   let fmt_reporter = Logs.format_reporter ~app:Fmt.stderr ~dst:Fmt.stderr () in
@@ -39,8 +33,7 @@ let impl_name =
 let set_cerb_conf () =
   let open Cerb_global in
   set_cerb_conf ~backend_name:"soteria-c" ~exec:false Random ~concurrency:false
-    Basic ~defacto:false ~permissive:false ~agnostic:false
-    ~ignore_bitfields:false
+    Basic ~defacto:false ~permissive:true ~agnostic:false ~ignore_bitfields:true
 
 let io : Cerb_backend.Pipeline.io_helpers =
   let open Cerb_backend.Pipeline in
@@ -203,7 +196,7 @@ let exec_main file_names =
 let exec_main_and_print log_level smt_file includes file_names =
   (* The following line is not set as an initialiser so that it is executed before initialising z3 *)
   Z3solver.set_smt_file smt_file;
-  setup_console_log log_level;
+  Logs.set_level log_level;
   Initialize_analysis.init_once ();
   Frontend.add_includes includes;
   let result = exec_main file_names in
@@ -250,7 +243,8 @@ let lsp () =
 
 (* Entry point function *)
 let show_ail (include_args : string list) (files : string list) =
-  setup_console_log (Some Debug);
+  Logs.set_level (Some Debug);
+  Logs.set_reporter (Logs_fmt.reporter ());
   Frontend.add_includes include_args;
   Initialize_analysis.init_once ();
   match parse_and_link_ail files with
