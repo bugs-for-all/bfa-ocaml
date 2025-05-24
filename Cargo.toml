@@ -2,7 +2,7 @@
 name = "soteria"
 description = "Soteria is a toolkit for writing symbolic bug-finding tools"
 license = "BSD-3-Clause"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 
 [[bin]]
