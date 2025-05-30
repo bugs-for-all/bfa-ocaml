@@ -40,5 +40,18 @@ module Exec_main = struct
   let cmd = Cmd.v (Cmd.info "exec-main") term
 end
 
-let cmd = Cmd.group (Cmd.info "soteria-rust") [ Exec_main.cmd ]
+module RUXt = struct
+  let term =
+    Term.(
+      const Soteria_rust_lib.Ruxt.Refute.find_unsoundness_and_print
+      $ Soteria_logs.Cli.term
+      $ Soteria_c_values.Solver_config.Cli.term
+      $ no_compile_flag
+      $ cleanup_flag
+      $ file_arg)
+
+  let cmd = Cmd.v (Cmd.info "ruxt") term
+end
+
+let cmd = Cmd.group (Cmd.info "soteria-rust") [ Exec_main.cmd; RUXt.cmd ]
 let () = exit @@ Cmd.eval cmd
