@@ -53,7 +53,7 @@ module M (Heap : Heap_intf.S) = struct
     | PanicSimple
     | PtrByteOp of Expressions.binop
     | PtrGuaranteedCmp
-    | PtrOp of Expressions.binop
+    | PtrOp of { op : Expressions.binop; check : bool }
     | PtrOffsetFrom of { unsigned : bool }
     | RawEq
     | Saturating of Expressions.binop
@@ -131,24 +131,24 @@ module M (Heap : Heap_intf.S) = struct
          ub_checks at runtime due to unchecked_op, this means ub checks also happen in
          the impl of core::ptr::..., and these checks are *SLOW* -- they do binary operations
          on the integer value of the pointer to ensure it is well aligned etc. *)
-      ("core::ptr::const_ptr::{@T}::add", PtrOp Add);
+      ("core::ptr::const_ptr::{@T}::add", PtrOp { op = Add; check = true });
       ("core::ptr::const_ptr::{@T}::byte_add", PtrByteOp Add);
       ("core::ptr::const_ptr::{@T}::byte_offset", PtrByteOp Add);
       ("core::ptr::const_ptr::{@T}::byte_sub", PtrByteOp Sub);
-      ("core::ptr::const_ptr::{@T}::offset", PtrOp Add);
-      ("core::ptr::const_ptr::{@T}::sub", PtrOp Sub);
-      ("core::ptr::mut_ptr::{@T}::add", PtrOp Add);
+      ("core::ptr::const_ptr::{@T}::offset", PtrOp { op = Add; check = true });
+      ("core::ptr::const_ptr::{@T}::sub", PtrOp { op = Sub; check = true });
+      ("core::ptr::mut_ptr::{@T}::add", PtrOp { op = Add; check = true });
       ("core::ptr::mut_ptr::{@T}::byte_add", PtrByteOp Add);
       ("core::ptr::mut_ptr::{@T}::byte_offset", PtrByteOp Add);
       ("core::ptr::mut_ptr::{@T}::byte_sub", PtrByteOp Sub);
-      ("core::ptr::mut_ptr::{@T}::offset", PtrOp Add);
-      ("core::ptr::mut_ptr::{@T}::sub", PtrOp Sub);
+      ("core::ptr::mut_ptr::{@T}::offset", PtrOp { op = Add; check = true });
+      ("core::ptr::mut_ptr::{@T}::sub", PtrOp { op = Add; check = true });
       (* This is super super wrong but Charon has broken Boxes :/ *)
       ("std::panicking::try::cleanup", FixmeTryCleanup);
       (* Intrinsics *)
       ("core::intrinsics::abort", PanicSimple);
       ("core::intrinsics::add_with_overflow", Checked Add);
-      ("core::intrinsics::arith_offset", PtrOp Add);
+      ("core::intrinsics::arith_offset", PtrOp { op = Add; check = false });
       ("core::intrinsics::assert_inhabited", AssertInhabited);
       (* TODO: is the following correct? *)
       ("core::intrinsics::assert_mem_uninitialized_valid", Nop);
@@ -202,7 +202,7 @@ module M (Heap : Heap_intf.S) = struct
       ("core::intrinsics::min_align_of", MinAlignOf GenArg);
       ("core::intrinsics::min_align_of_val", MinAlignOf Input);
       ("core::intrinsics::mul_with_overflow", Checked Mul);
-      ("core::intrinsics::offset", PtrOp Add);
+      ("core::intrinsics::offset", PtrOp { op = Add; check = true });
       ("core::intrinsics::pref_align_of", MinAlignOf GenArg);
       ("core::intrinsics::ptr_guaranteed_cmp", PtrGuaranteedCmp);
       ("core::intrinsics::ptr_offset_from", PtrOffsetFrom { unsigned = false });
@@ -335,7 +335,7 @@ module M (Heap : Heap_intf.S) = struct
          | PanicSimple -> std_panic
          | PtrByteOp op -> ptr_op ~byte:true op f.signature
          | PtrGuaranteedCmp -> ptr_guaranteed_cmp
-         | PtrOp op -> ptr_op op f.signature
+         | PtrOp { op; check } -> ptr_op ~check op f.signature
          | PtrOffsetFrom { unsigned } -> ptr_offset_from unsigned f.signature
          | RawEq -> raw_eq f.signature
          | Saturating op -> saturating op f.signature

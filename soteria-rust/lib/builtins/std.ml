@@ -247,7 +247,8 @@ module M (Heap : Heap_intf.S) = struct
     let++ (), state = Heap.store ptr ty v state in
     (Ptr ptr, state)
 
-  let ptr_op ?(byte = false) op (funsig : GAst.fun_sig) ~args ~state =
+  let ptr_op ?(check = true) ?(byte = false) op (funsig : GAst.fun_sig) ~args
+      ~state =
     let** ptr, meta, v =
       match args with
       | [ Ptr (ptr, meta); Base v ] -> Result.ok (ptr, meta, v)
@@ -267,7 +268,7 @@ module M (Heap : Heap_intf.S) = struct
     if%sat v ==@ 0s then Result.ok (Ptr (ptr, meta), state)
     else
       let v = if op = Expressions.Add then v else ~-v in
-      let++ ptr' = Sptr.offset ptr v |> Heap.lift_err state in
+      let++ ptr' = Sptr.offset ~check ptr v |> Heap.lift_err state in
       (Ptr (ptr', meta), state)
 
   let box_into_raw ~args ~state =
@@ -336,12 +337,8 @@ module M (Heap : Heap_intf.S) = struct
            before storing into dst, the semantics are that of copy. *)
       else if nonoverlapping then
         (* check for overlap *)
-        let** from_ptr_end =
-          Sptr.offset ~check:false from_ptr size |> Heap.lift_err state
-        in
-        let** to_ptr_end =
-          Sptr.offset ~check:false to_ptr size |> Heap.lift_err state
-        in
+        let** from_ptr_end = Sptr.offset from_ptr size |> Heap.lift_err state in
+        let** to_ptr_end = Sptr.offset to_ptr size |> Heap.lift_err state in
         if%sat
           Sptr.is_same_loc from_ptr to_ptr
           &&@ (Sptr.distance from_ptr to_ptr_end
@@ -655,12 +652,8 @@ module M (Heap : Heap_intf.S) = struct
         Heap.error `NullDereference state
       else
         (* check for overlap *)
-        let** from_ptr_end =
-          Sptr.offset ~check:false from_ptr size |> Heap.lift_err state
-        in
-        let** to_ptr_end =
-          Sptr.offset ~check:false to_ptr size |> Heap.lift_err state
-        in
+        let** from_ptr_end = Sptr.offset from_ptr size |> Heap.lift_err state in
+        let** to_ptr_end = Sptr.offset to_ptr size |> Heap.lift_err state in
         if%sat
           Sptr.is_same_loc from_ptr to_ptr
           &&@ (Sptr.distance from_ptr to_ptr_end

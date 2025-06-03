@@ -819,8 +819,15 @@ let bit_xor ~size ~signed v1 v2 =
 
 let bit_shl ~size ~signed v1 v2 =
   match (v1.node.kind, v2.node.kind) with
-  | Int i1, Int i2 -> int_z (Z.( lsl ) i1 (Z.to_int i2))
-  | _, Int i2 -> times v1 (int_z (Z.( lsl ) Z.one (Z.to_int i2)))
+  | Int i1, Int i2 ->
+      let shifted = Z.( lsl ) i1 (Z.to_int i2) in
+      let masked = Z.( land ) shifted (Z.pred (Z.( lsl ) Z.one size)) in
+      int_z masked
+  | _, Int i2 ->
+      let max = Z.( lsl ) Z.one size in
+      let shifted = times v1 (int_z (Z.( lsl ) Z.one (Z.to_int i2))) in
+      let masked = mod_ shifted (int_z max) in
+      masked
   | _ ->
       let v1_bv = bv_of_int size v1 in
       let v2_bv = bv_of_int size v2 in
@@ -829,7 +836,10 @@ let bit_shl ~size ~signed v1 v2 =
 
 let bit_shr ~size ~signed v1 v2 =
   match (v1.node.kind, v2.node.kind) with
-  | Int i1, Int i2 -> int_z (Z.( asr ) i1 (Z.to_int i2))
+  | Int i1, Int i2 ->
+      let shifted = Z.( asr ) i1 (Z.to_int i2) in
+      let masked = Z.( land ) shifted (Z.pred (Z.( lsl ) Z.one size)) in
+      int_z masked
   | _ ->
       let v1_bv = bv_of_int size v1 in
       let v2_bv = bv_of_int size v2 in

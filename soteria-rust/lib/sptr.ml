@@ -4,6 +4,7 @@ open Charon
 open Typed
 open T
 open Typed.Infix
+open Typed.Syntax
 
 module type S = sig
   (** pointer type *)
@@ -95,15 +96,16 @@ module ArithPtr : S with type t = arithptr_t = struct
     let offset_constrs = Layout.int_constraints Values.Isize in
     fun { ptr; size; _ } ->
       let ofs = Typed.Ptr.ofs ptr in
-      Typed.conj ((ofs <@ Typed.int size) :: offset_constrs ofs)
+      Typed.conj ((ofs <=@ Typed.int size) :: offset_constrs ofs)
 
   let offset ?(check = true) ?(ty = Types.TLiteral (TInteger U8))
       ({ ptr; _ } as fptr) off =
-    let { size; _ } : Layout.layout = Layout.layout_of ty in
-    let ptr = Typed.Ptr.add_ofs ptr (Typed.int size *@ off) in
+    let* size = Layout.size_of_s ty in
+    let off = size *@ off in
+    let ptr = Typed.Ptr.add_ofs ptr off in
     let ptr = { fptr with ptr } in
     if check then
-      if%sat constraints ptr then Result.ok ptr
+      if%sat off ==@ 0s ||@ constraints ptr then Result.ok ptr
       else Result.error `UBDanglingPointer
     else Result.ok ptr
 
