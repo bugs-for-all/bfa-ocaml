@@ -29,6 +29,22 @@ pub const fn nondet<T>() -> T {
     rusteria::nondet::<T>()
 }
 
+#[inline(never)]
+pub const fn cover(_cond: bool, _msg: &'static str) {}
+
+#[macro_export]
+macro_rules! cover {
+    () => {
+        kani::cover(true, "cover location");
+    };
+    ($cond:expr $(,)?) => {
+        kani::cover($cond, concat!("cover condition: ", stringify!($cond)));
+    };
+    ($cond:expr, $msg:literal) => {
+        kani::cover($cond, $msg);
+    };
+}
+
 pub mod invariant;
 pub use invariant::Invariant;
 

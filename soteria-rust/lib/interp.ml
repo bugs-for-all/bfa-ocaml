@@ -175,8 +175,7 @@ module Make (Heap : Heap_intf.S) = struct
             (v, state)
         | Base off ->
             let* off = cast_checked ~ty:Typed.t_int off in
-            let ptr = Sptr.null_ptr in
-            let ptr = Sptr.offset ptr off in
+            let ptr = Sptr.null_ptr_of off in
             Result.ok ((ptr, None), state)
         | _ -> not_impl "Unexpected value when dereferencing place")
     | PlaceProjection (base, Field (kind, field)) ->
@@ -184,7 +183,9 @@ module Make (Heap : Heap_intf.S) = struct
         L.debug (fun f ->
             f "Projecting field %a (kind %a) for %a" Types.pp_field_id field
               Expressions.pp_field_proj_kind kind Sptr.pp ptr);
-        let ptr' = Sptr.project base.ty kind field ptr in
+        let** ptr' =
+          Sptr.project base.ty kind field ptr |> Heap.lift_err state
+        in
         L.debug (fun f ->
             f
               "Dereferenced ADT projection %a, field %a, with pointer %a to \
@@ -207,7 +208,7 @@ module Make (Heap : Heap_intf.S) = struct
         let idx = as_base_of ~ty:Typed.t_int idx in
         let idx = if from_end then len -@ idx else idx in
         if%sat 0s <=@ idx &&@ (idx <@ len) then (
-          let ptr' = Sptr.offset ~ty ptr idx in
+          let** ptr' = Sptr.offset ~ty ptr idx |> Heap.lift_err state in
           L.debug (fun f ->
               f "Projected %a, index %a, to pointer %a" Sptr.pp ptr Typed.ppa
                 idx Sptr.pp ptr');
@@ -233,7 +234,7 @@ module Make (Heap : Heap_intf.S) = struct
         let to_ = as_base_of ~ty:Typed.t_int to_ in
         let to_ = if from_end then len -@ to_ else to_ in
         if%sat 0s <=@ from &&@ (from <=@ to_) &&@ (to_ <=@ len) then (
-          let ptr' = Sptr.offset ~ty ptr from in
+          let** ptr' = Sptr.offset ~ty ptr from |> Heap.lift_err state in
           let slice_len = to_ -@ from in
           L.debug (fun f ->
               f "Projected %a, slice %a..%a%s, to pointer %a, len %a" Sptr.pp
@@ -549,8 +550,8 @@ module Make (Heap : Heap_intf.S) = struct
                 in
                 let ty = Charon_util.get_pointee (type_of_operand e1) in
                 let* v = cast_checked ~ty:Typed.t_int v in
-                let p' = Sptr.offset ~ty p v in
-                Result.ok (Ptr (p', meta), state)
+                let++ p' = Sptr.offset ~ty p v |> Heap.lift_err state in
+                (Ptr (p', meta), state)
             | _ ->
                 let++ res = Core.eval_ptr_binop op p1 p2 state in
                 (Base res, state))
@@ -587,7 +588,7 @@ module Make (Heap : Heap_intf.S) = struct
             let layout = Layout.of_variant var in
             let discr_ofs = Typed.int @@ Array.get layout.members_ofs 0 in
             let discr_ty = Types.TLiteral (TInteger int_ty) in
-            let loc = Sptr.offset loc discr_ofs in
+            let** loc = Sptr.offset loc discr_ofs |> Heap.lift_err state in
             Heap.load (loc, None) discr_ty state
         | Enum [] ->
             Fmt.kstr not_impl "Unsupported discriminant for empty enums"
@@ -648,7 +649,7 @@ module Make (Heap : Heap_intf.S) = struct
         | [ Ptr (ptr, _); Base meta ] -> Result.ok (Ptr (ptr, Some meta), state)
         | [ Base v; Base meta ] ->
             let* v = cast_checked ~ty:Typed.t_int v in
-            let ptr = Sptr.offset Sptr.null_ptr v in
+            let ptr = Sptr.null_ptr_of v in
             Result.ok (Ptr (ptr, Some meta), state)
         | _ ->
             Fmt.kstr not_impl "AggregatedRawPtr: invalid arguments %a"

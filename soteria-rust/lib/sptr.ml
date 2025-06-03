@@ -1,3 +1,5 @@
+open Rustsymex
+open Rustsymex.Syntax
 open Charon
 open Typed
 open T
@@ -9,6 +11,7 @@ module type S = sig
 
   val pp : t Fmt.t
   val null_ptr : t
+  val null_ptr_of : sint Typed.t -> t
 
   (** Pointer equality *)
   val sem_eq : t -> t -> sbool Typed.t
@@ -26,13 +29,24 @@ module type S = sig
   (** The symbolic constraints needed for the pointer to be valid. *)
   val constraints : t -> sbool Typed.t
 
-  (** [offset ~ty ptr off] Offsets [ptr] by the size of [ty] * [off]. [ty]
-      defaults to u8. *)
-  val offset : ?ty:Charon.Types.ty -> t -> sint Typed.t -> t
+  (** [offset ?check ?ty ptr off] Offsets [ptr] by the size of [ty] * [off].
+      [ty] defaults to u8. May result in a dangling pointer error if the pointer
+      goes over the allocation limit. This check can be disabled with
+      [~check:false]. *)
+  val offset :
+    ?check:bool ->
+    ?ty:Charon.Types.ty ->
+    t ->
+    sint Typed.t ->
+    (t, [> `UBDanglingPointer ], 'a) Result.t
 
   (** Project a pointer to a field of the given type. *)
   val project :
-    Types.ty -> Expressions.field_proj_kind -> Types.field_id -> t -> t
+    Types.ty ->
+    Expressions.field_proj_kind ->
+    Types.field_id ->
+    t ->
+    (t, [> `UBDanglingPointer ], 'a) Result.t
 
   (** Decay a pointer into an integer value, losing provenance. *)
   val decay : t -> sint Typed.t Rustsymex.t
@@ -64,6 +78,10 @@ module ArithPtr : S with type t = arithptr_t = struct
   let null_ptr =
     { ptr = Typed.Ptr.null; tag = Tree_borrow.zero; align = 1; size = 0 }
 
+  let null_ptr_of ofs =
+    let ptr = Typed.Ptr.add_ofs Typed.Ptr.null ofs in
+    { ptr; tag = Tree_borrow.zero; align = 1; size = 0 }
+
   let sem_eq { ptr = ptr1; _ } { ptr = ptr2; _ } = ptr1 ==@ ptr2
   let is_at_null_loc { ptr; _ } = Typed.Ptr.is_at_null_loc ptr
 
@@ -75,14 +93,19 @@ module ArithPtr : S with type t = arithptr_t = struct
 
   let constraints =
     let offset_constrs = Layout.int_constraints Values.Isize in
-    fun { ptr; _ } ->
+    fun { ptr; size; _ } ->
       let ofs = Typed.Ptr.ofs ptr in
-      Typed.conj (offset_constrs ofs)
+      Typed.conj ((ofs <@ Typed.int size) :: offset_constrs ofs)
 
-  let offset ?(ty = Types.TLiteral (TInteger U8)) ({ ptr; _ } as fptr) off =
+  let offset ?(check = true) ?(ty = Types.TLiteral (TInteger U8))
+      ({ ptr; _ } as fptr) off =
     let { size; _ } : Layout.layout = Layout.layout_of ty in
     let ptr = Typed.Ptr.add_ofs ptr (Typed.int size *@ off) in
-    { fptr with ptr }
+    let ptr = { fptr with ptr } in
+    if check then
+      if%sat constraints ptr then Result.ok ptr
+      else Result.error `UBDanglingPointer
+    else Result.ok ptr
 
   let project ty kind field ptr =
     let field = Types.FieldId.to_int field in

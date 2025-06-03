@@ -17,6 +17,7 @@ type t =
     `RefToUninhabited
   | `StdErr of string
   | `UBAbort
+  | `UBDanglingPointer
   | `UBPointerArithmetic
   | `UBPointerComparison
   | `UBTransmute
@@ -65,6 +66,7 @@ let pp_err ft ((err : [< t ]), call_trace) =
     | `StdErr msg -> Fmt.pf ft "UB in std: %s" msg
     | `UninitializedMemoryAccess -> Fmt.string ft "Uninitialized memory access"
     | `UBAbort -> Fmt.string ft "UB: undefined behaviour trap reached"
+    | `UBDanglingPointer -> Fmt.string ft "UB: dangling pointer"
     | `UBPointerArithmetic -> Fmt.string ft "UB: pointer arithmetic"
     | `UBPointerComparison -> Fmt.string ft "UB: pointer comparison"
     | `UBTransmute -> Fmt.string ft "UB: Transmute"

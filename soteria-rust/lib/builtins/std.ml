@@ -117,7 +117,7 @@ module M (Heap : Heap_intf.S) = struct
     (* TODO: take into account idx.mutability *)
     let idx = as_base_of ~ty:Typed.t_int (List.nth args 1) in
     let ty = List.hd gen_args.types in
-    let ptr' = Sptr.offset ~ty ptr idx in
+    let** ptr' = Sptr.offset ~ty ptr idx |> Heap.lift_err state in
     if not idx_op.is_range then
       if%sat 0s <=@ idx &&@ (idx <@ size) then
         Result.ok (Ptr (ptr', None), state)
@@ -262,10 +262,13 @@ module M (Heap : Heap_intf.S) = struct
         | TRawPtr (ty, _) :: _ -> ty
         | _ -> failwith "ptr_offset_from: invalid arguments"
     in
-    let v = if op = Expressions.Add then v else ~-v in
-    let ptr' = Sptr.offset ~ty ptr v in
-    if%sat Sptr.constraints ptr' then Result.ok (Ptr (ptr', meta), state)
-    else Heap.error `Overflow state
+    let* size = Layout.size_of_s ty in
+    let v = v *@ size in
+    if%sat v ==@ 0s then Result.ok (Ptr (ptr, meta), state)
+    else
+      let v = if op = Expressions.Add then v else ~-v in
+      let++ ptr' = Sptr.offset ptr v |> Heap.lift_err state in
+      (Ptr (ptr', meta), state)
 
   let box_into_raw ~args ~state =
     (* internally a box is exactly a pointer so nothing to do *)
@@ -333,8 +336,12 @@ module M (Heap : Heap_intf.S) = struct
            before storing into dst, the semantics are that of copy. *)
       else if nonoverlapping then
         (* check for overlap *)
-        let from_ptr_end = Sptr.offset from_ptr size in
-        let to_ptr_end = Sptr.offset to_ptr size in
+        let** from_ptr_end =
+          Sptr.offset ~check:false from_ptr size |> Heap.lift_err state
+        in
+        let** to_ptr_end =
+          Sptr.offset ~check:false to_ptr size |> Heap.lift_err state
+        in
         if%sat
           Sptr.is_same_loc from_ptr to_ptr
           &&@ (Sptr.distance from_ptr to_ptr_end
@@ -390,9 +397,10 @@ module M (Heap : Heap_intf.S) = struct
           let list = List.init (Z.to_int bytes) Fun.id in
           let++ (), state =
             Result.fold_list list ~init:((), state) ~f:(fun ((), state) i ->
-                let ptr = Sptr.offset ptr @@ Typed.int i in
-                Heap.store (ptr, None) (Types.TLiteral (TInteger U8)) (Base v)
-                  state)
+                let** ptr =
+                  Sptr.offset ptr @@ Typed.int i |> Heap.lift_err state
+                in
+                Heap.store (ptr, None) (TLiteral (TInteger U8)) (Base v) state)
           in
           (Tuple [], state)
       | _ -> failwith "write_bytes: don't know how to handle symbolic sizes"
@@ -407,8 +415,8 @@ module M (Heap : Heap_intf.S) = struct
     | [ Ptr (ptr, _); Base meta ] -> Result.ok (Ptr (ptr, Some meta), state)
     | [ Base v; Base meta ] ->
         let* v = cast_checked ~ty:Typed.t_int v in
-        let ptr = Sptr.offset Sptr.null_ptr v in
-        Result.ok (Ptr (ptr, Some meta), state)
+        let++ ptr = Sptr.offset Sptr.null_ptr v |> Heap.lift_err state in
+        (Ptr (ptr, Some meta), state)
     | _ ->
         Fmt.failwith "from_raw_parts: invalid arguments %a"
           Fmt.(list ~sep:comma pp_rust_val)
@@ -494,22 +502,21 @@ module M (Heap : Heap_intf.S) = struct
     in
     let* len = cast_checked ~ty:Typed.t_int len in
     let byte = Types.TLiteral (TInteger U8) in
-    let rec aux l r len state =
+    let rec aux ?(inc = 1s) l r len state =
       if%sat len ==@ 0s then Result.ok (Base 0s, state)
       else
+        let** l = Sptr.offset l inc |> Heap.lift_err state in
+        let** r = Sptr.offset r inc |> Heap.lift_err state in
         let** bl, state = Heap.load (l, None) byte state in
         let bl = as_base_of ~ty:Typed.t_int bl in
         let** br, state = Heap.load (r, None) byte state in
         let br = as_base_of ~ty:Typed.t_int br in
-        if%sat bl ==@ br then
-          let l = Sptr.offset l 1s in
-          let r = Sptr.offset r 1s in
-          aux l r (len -@ 1s) state
+        if%sat bl ==@ br then aux l r (len -@ 1s) state
         else
           if%sat bl <@ br then Result.ok (Base (-1s), state)
           else Result.ok (Base 1s, state)
     in
-    aux l r len state
+    aux ~inc:0s l r len state
 
   let likely ~args ~state =
     match args with
@@ -633,12 +640,12 @@ module M (Heap : Heap_intf.S) = struct
     let ty =
       match funsig.inputs with
       | TRawPtr (ty, _) :: _ -> ty
-      | _ -> failwith "copy_nonoverlapping: invalid arguments"
+      | _ -> failwith "typed_swap_nonoverlapping: invalid arguments"
     in
     let ((from_ptr, _) as from), ((to_ptr, _) as to_) =
       match args with
       | [ Ptr from_ptr; Ptr to_ptr ] -> (from_ptr, to_ptr)
-      | _ -> failwith "copy_nonoverlapping: invalid arguments"
+      | _ -> failwith "typed_swap_nonoverlapping: invalid arguments"
     in
     let** () = Heap.check_ptr_align from_ptr ty state in
     let** () = Heap.check_ptr_align to_ptr ty state in
@@ -648,8 +655,12 @@ module M (Heap : Heap_intf.S) = struct
         Heap.error `NullDereference state
       else
         (* check for overlap *)
-        let from_ptr_end = Sptr.offset from_ptr size in
-        let to_ptr_end = Sptr.offset to_ptr size in
+        let** from_ptr_end =
+          Sptr.offset ~check:false from_ptr size |> Heap.lift_err state
+        in
+        let** to_ptr_end =
+          Sptr.offset ~check:false to_ptr size |> Heap.lift_err state
+        in
         if%sat
           Sptr.is_same_loc from_ptr to_ptr
           &&@ (Sptr.distance from_ptr to_ptr_end
