@@ -11,10 +11,10 @@ type 'a err = 'a * Call_trace.t
 let add_to_call_trace (err, trace_elem) trace_elem' =
   (err, trace_elem' :: trace_elem)
 
-let with_error_loc_as_call_trace () f =
+let with_error_loc_as_call_trace st f =
   let open Rustsymex.Syntax in
   let+- err, loc = f () in
-  (err, Call_trace.singleton ~loc ~msg:"Triggering memory operation" ())
+  ((err, Call_trace.singleton ~loc ~msg:"Triggering memory operation" ()), st)
 
 module SPmap = Pmap_direct_access (struct
   include Typed
@@ -61,6 +61,7 @@ end
 type t = {
   heap : Tree_block.t Freeable.t SPmap.t option;
   globals : Sptr.t Charon_util.full_ptr GlobMap.t;
+  errors : Error.t err list; [@printer Fmt.list Error.pp_err]
 }
 [@@deriving show { with_path = false }]
 
@@ -92,9 +93,12 @@ let pp_pretty ~ignore_freed ft { heap; _ } =
   in
   match heap with
   | None -> Fmt.pf ft "Empty Heap"
-  | Some st -> SPmap.pp ~ignore (Freeable.pp Tree_block.pp_pretty) ft st
+  | Some st ->
+      SPmap.pp ~ignore
+        (Freeable.pp (fun fmt tb -> Tree_block.pp_pretty fmt tb))
+        ft st
 
-let empty = { heap = None; globals = GlobMap.empty }
+let empty = { heap = None; globals = GlobMap.empty; errors = [] }
 
 let log action ptr st =
   L.debug (fun m ->
@@ -117,16 +121,10 @@ let with_tbs b f =
     | None -> (None, Tree_borrow.init ~state:UB ())
     | Some block -> (Some block, Tree_borrow.init ~state:Unique ())
   in
-  let+ res = f (block, tree_borrow) in
-  match res with
-  | Soteria_symex.Compo_res.Ok (v, block) ->
-      (* let block = Option.map (fun b -> (b, tree_borrow)) block in *)
-      Soteria_symex.Compo_res.Ok (v, block)
-  | Missing fixes -> Missing fixes
-  | Error e -> Error e
+  f (block, tree_borrow)
 
-let check_ptr_align (ptr : Sptr.t) ty =
-  let@ () = with_error_loc_as_call_trace () in
+let check_ptr_align (ptr : Sptr.t) ty st =
+  let@ () = with_error_loc_as_call_trace st in
   let* expected_align = Layout.align_of_s ty in
   let ofs = Typed.Ptr.ofs ptr.ptr in
   let align = ptr.align in
@@ -154,7 +152,7 @@ let with_ptr (ptr : Sptr.t) (st : t)
     (v, heap)
 
 let uninit (ptr, _) ty st =
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace st in
   let@ () = with_loc_err () in
   log "uninit" ptr st;
   let* size = Layout.size_of_s ty in
@@ -163,8 +161,8 @@ let uninit (ptr, _) ty st =
   Tree_block.uninit_range ofs size block
 
 let load ?(is_move = false) ?(ignore_borrow = true) (ptr, meta) ty st =
-  let** () = check_ptr_align ptr ty in
-  let@ () = with_error_loc_as_call_trace () in
+  let** () = check_ptr_align ptr ty st in
+  let@ () = with_error_loc_as_call_trace st in
   let@ () = with_loc_err () in
   log "load" ptr st;
   let@ ofs, block = with_ptr ptr st in
@@ -192,7 +190,7 @@ let tb_load (ptr, _) ty st =
   let* size = Layout.size_of_s ty in
   if%sat size ==@ 0s then Result.ok ((), st)
   else
-    let@ () = with_error_loc_as_call_trace () in
+    let@ () = with_error_loc_as_call_trace st in
     let@ () = with_loc_err () in
     log "tb_load" ptr st;
     let@ ofs, block = with_ptr ptr st in
@@ -211,7 +209,7 @@ let store (ptr, _) ty sval st =
   let parts = Encoder.rust_to_cvals sval ty in
   if List.is_empty parts then Result.ok ((), st)
   else
-    let@ () = with_error_loc_as_call_trace () in
+    let@ () = with_error_loc_as_call_trace st in
     let@ () = with_loc_err () in
     L.debug (fun f ->
         f "Parsed to parts [%a]"
@@ -229,7 +227,7 @@ let store (ptr, _) ty sval st =
         Tree_block.store (offset +@ ofs) ty value ptr.tag tb block)
 
 let copy_nonoverlapping ~dst:(dst, _) ~src:(src, _) ~size st =
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace st in
   let@ () = with_loc_err () in
   let** tree_to_write, st =
     let@ ofs, block = with_ptr src st in
@@ -245,7 +243,7 @@ let alloc size align st =
   (* Commenting this out as alloc cannot fail *)
   (* let@ () = with_loc_err () in*)
   let@ heap = with_heap st in
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace st in
   let tb = Tree_borrow.init ~state:Unique () in
   let block = Freeable.Alive (Tree_block.alloc (Typed.int size)) in
   let** loc, heap = SPmap.alloc ~new_codom:block heap in
@@ -263,7 +261,7 @@ let alloc_ty ty st =
 
 let alloc_tys tys st =
   let@ heap = with_heap st in
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace st in
   SPmap.allocs heap ~els:tys ~fn:(fun ty loc ->
       (* make treeblock *)
       let* layout = Layout.layout_of_s ty in
@@ -280,7 +278,7 @@ let alloc_tys tys st =
 
 let free (({ ptr; _ } : Sptr.t), _) ({ heap; _ } as st : t) :
     (unit * t, 'err, serialized list) Result.t =
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace st in
   if%sat Typed.Ptr.ofs ptr ==@ 0s then
     let@ () = with_loc_err () in
     let++ (), heap =
@@ -293,7 +291,7 @@ let free (({ ptr; _ } : Sptr.t), _) ({ heap; _ } as st : t) :
   else error `InvalidFree
 
 let zeros (ptr, _) size st =
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace st in
   let@ () = with_loc_err () in
   log "zeroes" ptr st;
   let@ ofs, block = with_ptr ptr st in
@@ -301,7 +299,7 @@ let zeros (ptr, _) size st =
   Tree_block.zero_range ofs size block
 
 let error err _st =
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace _st in
   L.info (fun m -> m "Heap errored !");
   error err
 
@@ -333,7 +331,7 @@ let borrow (ptr, meta) (ty : Charon.Types.ty)
   (* &UnsafeCell<T> are treated as raw pointers, and reuse parent's tag! *)
   if Layout.is_unsafe_cell ty then Result.ok ((ptr, meta), st)
   else
-    let@ () = with_error_loc_as_call_trace () in
+    let@ () = with_error_loc_as_call_trace st in
     let@ () = with_loc_err () in
     let@ _, block = with_ptr ptr st in
     let* tag_st =
@@ -357,7 +355,7 @@ let protect (ptr, meta) (ty : Charon.Types.ty) (mut : Charon.Types.ref_kind) st
     =
   if Layout.is_unsafe_cell ty then Result.ok ((ptr, meta), st)
   else
-    let@ () = with_error_loc_as_call_trace () in
+    let@ () = with_error_loc_as_call_trace st in
     let@ () = with_loc_err () in
     let@ ofs, block = with_ptr ptr st in
     let tag_st =
@@ -379,7 +377,7 @@ let protect (ptr, meta) (ty : Charon.Types.ty) (mut : Charon.Types.ref_kind) st
     ((ptr', meta), block)
 
 let unprotect (ptr, _) (ty : Charon.Types.ty) st =
-  let@ () = with_error_loc_as_call_trace () in
+  let@ () = with_error_loc_as_call_trace st in
   let@ () = with_loc_err () in
   let@ ofs, block = with_ptr ptr st in
   let* size = Layout.size_of_s ty in
@@ -410,6 +408,19 @@ let leak_check st =
       [] heap
   in
   if List.is_empty leaks then Result.ok ((), heap) else error `MemoryLeak st
+
+let add_error e ({ errors; _ } as st) =
+  Result.ok ((), { st with errors = (e :> Error.t err) :: errors })
+
+let pop_error ({ errors; _ } as st) =
+  match errors with
+  | e :: rest -> Result.error (e, { st with errors = rest })
+  | _ -> failwith "pop_error with no errors?"
+
+let unwind_with ~f ~fe symex =
+  Result.bind_2 symex ~f ~fe:(fun (((err_ty, _) as err), state) ->
+      if Error.is_unwindable err_ty then fe (err, state)
+      else Result.error (err, state))
 
 let produce (serialized : serialized) ({ heap; _ } as st : t) : t Rustsymex.t =
   let non_null_locs =
