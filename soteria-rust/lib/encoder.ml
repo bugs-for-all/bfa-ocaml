@@ -275,7 +275,7 @@ module Make (Sptr : Sptr.S) = struct
           aux_fields ~f:(fun fs -> Tuple fs) ~layout offset types
       | TAdt (TAdtId t_id, _) as ty -> (
           let type_decl = Crate.get_adt t_id in
-          match type_decl.kind with
+          match type_decl.type_kind with
           | Struct fields ->
               let layout = layout_of ty in
               fields
@@ -288,7 +288,7 @@ module Make (Sptr : Sptr.S) = struct
           | Union fs -> aux_union offset fs
           | _ ->
               Fmt.failwith "Unhandled ADT kind in rust_of_cvals: %a"
-                Types.pp_type_decl_kind type_decl.kind)
+                Types.pp_type_decl_kind type_decl.type_kind)
       | TAdt (TBuiltin TArray, { types = [ sub_ty ]; _ }) as ty ->
           let layout = layout_of ty in
           let len = Array.length layout.members_ofs in

@@ -48,18 +48,22 @@ let get_trait_impl id =
   UllbcAst.TraitImplId.Map.find id crate.trait_impls
 
 let is_enum adt_id =
-  match (get_adt adt_id).kind with Enum _ -> true | _ -> false
+  match (get_adt adt_id).type_kind with Enum _ -> true | _ -> false
 
 let is_struct adt_id =
-  match (get_adt adt_id).kind with Struct _ -> true | _ -> false
+  match (get_adt adt_id).type_kind with Struct _ -> true | _ -> false
 
 let as_enum adt_id =
-  match (get_adt adt_id).kind with
+  match (get_adt adt_id).type_kind with
   | Enum variants -> variants
-  | _ -> assert false
+  | _ -> failwith "as_struct expected an enum"
 
 let as_struct adt_id =
-  match (get_adt adt_id).kind with Struct fields -> fields | _ -> assert false
+  match (get_adt adt_id).type_kind with
+  | Struct fields -> fields
+  | _ -> failwith "as_struct expected a struct"
 
 let as_union adt_id =
-  match (get_adt adt_id).kind with Union fields -> fields | _ -> assert false
+  match (get_adt adt_id).type_kind with
+  | Union fields -> fields
+  | _ -> failwith "as_union expected a union"

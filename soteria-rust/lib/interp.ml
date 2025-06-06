@@ -407,7 +407,7 @@ module Make (Heap : Heap_intf.S) = struct
                   get_size ty
               | TAdt (TAdtId id, _) -> (
                   let type_decl = Crate.get_adt id in
-                  match type_decl.kind with
+                  match type_decl.type_kind with
                   | Struct (_ :: _ as fields) ->
                       get_size (List.last fields).field_ty
                   | _ -> not_impl "Couldn't get size in CastUnsize")
@@ -423,6 +423,23 @@ module Make (Heap : Heap_intf.S) = struct
             let* fn_ptr =
               match v with
               | ConstFn fn_ptr -> return fn_ptr
+              | Struct [] ->
+                  let ty = type_of_operand e in
+                  let fn_opt : Expressions.fn_ptr option =
+                    match ty with
+                    | TAdt (TAdtId id, gargs) -> (
+                        let adt = Crate.get_adt id in
+                        match (adt.type_kind, adt.kind) with
+                        | Struct [], ClosureItem { fun_id; _ } ->
+                            Some
+                              {
+                                func = FunId (FRegular fun_id);
+                                generics = gargs;
+                              }
+                        | _ -> None)
+                    | _ -> None
+                  in
+                  of_opt_not_impl ~msg:"Invalid argument to CastFnPtr" fn_opt
               | _ -> not_impl "Invalid argument to CastFnPtr"
             in
             let++ ptr, state = Heap.declare_fn fn_ptr state in
@@ -577,34 +594,24 @@ module Make (Heap : Heap_intf.S) = struct
               Expressions.pp_nullop op)
     | Discriminant (place, kind) -> (
         let** (loc, _), state = resolve_place ~store state place in
-        let enum = Crate.get_adt kind in
-        match enum.kind with
+        let variants = Crate.as_enum kind in
+        match variants with
         (* enums with one fieldless variant are ZSTs, so we can't load their discriminant! *)
-        | Enum [ { fields = []; discriminant; _ } ] ->
+        | [ { fields = []; discriminant; _ } ] ->
             let discr = Typed.int_z discriminant.value in
             Result.ok (Base discr, state)
-        | Enum (var :: _) ->
+        | var :: _ ->
             let int_ty = var.discriminant.int_ty in
             let layout = Layout.of_variant var in
             let discr_ofs = Typed.int @@ Array.get layout.members_ofs 0 in
             let discr_ty = Types.TLiteral (TInteger int_ty) in
             let** loc = Sptr.offset loc discr_ofs |> Heap.lift_err state in
             Heap.load (loc, None) discr_ty state
-        | Enum [] ->
-            Fmt.kstr not_impl "Unsupported discriminant for empty enums"
-        | k ->
-            Fmt.failwith "Expected an enum for discriminant, got %a"
-              Types.pp_type_decl_kind k)
+        | [] -> Fmt.kstr not_impl "Unsupported discriminant for empty enums")
     (* Enum aggregate *)
     | Aggregate (AggregatedAdt (TAdtId t_id, Some v_id, None, _), vals) ->
-        let type_decl = Crate.get_adt t_id in
-        let variant =
-          match (type_decl : Types.type_decl) with
-          | { kind = Enum variants; _ } -> Types.VariantId.nth variants v_id
-          | _ ->
-              Fmt.failwith "Unexpected type declaration in enum aggregate: %a"
-                Types.pp_type_decl type_decl
-        in
+        let variants = Crate.as_enum t_id in
+        let variant = Types.VariantId.nth variants v_id in
         let discr = value_of_scalar variant.discriminant in
         let++ vals, state = eval_operand_list ~store state vals in
         (Enum (discr, vals), state)

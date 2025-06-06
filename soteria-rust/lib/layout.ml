@@ -129,7 +129,7 @@ let rec layout_of (ty : Types.ty) : layout =
   (* Custom ADTs (struct, enum, etc.) *)
   | TAdt (TAdtId id, _) -> (
       let adt = Crate.get_adt id in
-      match adt.kind with
+      match adt.type_kind with
       | Struct fields -> layout_of_members @@ field_tys fields
       | Enum [] -> { size = 0; align = 1; members_ofs = [||] }
       (* fieldless enums with one variant are zero-sized *)
@@ -357,7 +357,7 @@ let rec nondet ty : 'a rust_val Rustsymex.t =
       Array fields
   | TAdt (TAdtId t_id, _) -> (
       let type_decl = Crate.get_adt t_id in
-      match type_decl.kind with
+      match type_decl.type_kind with
       | Enum variants -> (
           let disc_ty = (List.hd variants).discriminant.int_ty in
           let* disc_val = nondet_literal_ty (Values.TInteger disc_ty) in
@@ -406,7 +406,7 @@ let rec zeroed ~(null_ptr : 'a) : Types.ty -> 'a rust_val option =
       |> Option.map (fun v -> Array (List.init len (fun _ -> v)))
   | TAdt (TAdtId t_id, _) -> (
       let adt = Crate.get_adt t_id in
-      match adt.kind with
+      match adt.type_kind with
       | Struct fields ->
           fields
           |> Charon_util.field_tys
@@ -445,7 +445,7 @@ let rec is_inhabited : Types.ty -> bool = function
   | TNever -> false
   | TAdt (TAdtId id, _) -> (
       let adt = Crate.get_adt id in
-      match adt.kind with
+      match adt.type_kind with
       | Struct fs -> List.for_all is_inhabited @@ Charon_util.field_tys fs
       | Union fs -> List.exists is_inhabited @@ Charon_util.field_tys fs
       | Enum [] -> false
@@ -470,7 +470,7 @@ let rec as_zst : Types.ty -> 'a rust_val option =
       Some (Array [])
   | TAdt (TAdtId id, _) -> (
       let adt = Crate.get_adt id in
-      match adt.kind with
+      match adt.type_kind with
       | Struct fs ->
           as_zsts @@ Charon_util.field_tys fs
           |> Option.map (fun fs -> Struct fs)
@@ -482,13 +482,10 @@ let rec as_zst : Types.ty -> 'a rust_val option =
       | _ -> None)
   | TAdt (TTuple, { types; _ }) ->
       as_zsts types |> Option.map (fun fs -> Tuple fs)
-  | TFnDef (id, _) ->
-      Some
-        (ConstFn
-           {
-             func = FunId (FRegular id);
-             generics = TypesUtils.empty_generic_args;
-           })
+  | TFnDef fn_binder ->
+      let generics = fn_binder.binder_value.fun_generics in
+      let id = fn_binder.binder_value.fun_id in
+      Some (ConstFn { func = FunId (FRegular id); generics })
   | _ -> None
 
 (** Apply the compiler-attribute to the given value *)
@@ -519,7 +516,7 @@ let rec is_unsafe_cell : Types.ty -> bool = function
       let adt = Crate.get_adt adt_id in
       if adt.item_meta.lang_item = Some "unsafe_cell" then true
       else
-        match adt.kind with
+        match adt.type_kind with
         | Struct fs | Union fs -> List.exists is_unsafe_cell (field_tys fs)
         | Enum vs ->
             Iter.exists is_unsafe_cell
