@@ -474,7 +474,7 @@ module Make (State : State_intf.S) = struct
           match op with
           | PostfixIncr -> arith_add ~state v operand
           | PostfixDecr -> arith_sub ~state v operand
-          | _ -> failwith "unreachable: postfix is not postifx??"
+          | _ -> failwith "unreachable: postfix is not postfix??"
         in
         let** res_opt =
           try_immediate_postfix_op ~prog ~apply_op store state e
