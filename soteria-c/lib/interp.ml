@@ -114,12 +114,9 @@ end
    and want to avoid passing it to every single function in the interpreter.
    TODO: If this works well, do the same thing for prog.
    *)
-type _ Effect.t +=
-  | Get_fun_ctx : Fun_ctx.t Effect.t
-  | Get_prog : Ail_tys.linked_program Effect.t
+type _ Effect.t += Get_fun_ctx : Fun_ctx.t Effect.t
 
 let get_fun_ctx () = Effect.perform Get_fun_ctx
-let get_prog () = Effect.perform Get_prog
 
 module Make (State : State_intf.S) = struct
   module InterpM = InterpM (State)
@@ -172,7 +169,7 @@ module Make (State : State_intf.S) = struct
     (T.cval Typed.t * state, 'err, State.serialized list) Result.t
 
   let get_param_tys name =
-    let ptys = Ail_helpers.get_param_tys ~prog:(get_prog ()) name in
+    let ptys = Ail_helpers.get_param_tys name in
     Csymex.of_opt_not_impl ~msg:"Couldn't find function prototype" ptys
 
   let fold_bindings (bindings : AilSyntax.bindings) ~init ~f =
@@ -258,7 +255,7 @@ module Make (State : State_intf.S) = struct
     let (AilSyntax.AnnotatedExpression (_, _, _, e)) = e in
     match e with
     | AilEident id -> (
-        let id = Ail_helpers.resolve_sym ~prog:(get_prog ()) id in
+        let id = Ail_helpers.resolve_sym id in
         match Store.find_opt id store with
         | Some { kind = Some (Value v); _ } -> Result.ok (Some v, store, state)
         | Some { kind = Some Uninit; _ } ->
@@ -270,7 +267,7 @@ module Make (State : State_intf.S) = struct
     let (AilSyntax.AnnotatedExpression (_, _, _, lvalue)) = lvalue in
     match lvalue with
     | AilEident id -> (
-        let id = Ail_helpers.resolve_sym ~prog:(get_prog ()) id in
+        let id = Ail_helpers.resolve_sym id in
         match Store.find_opt id store with
         | Some { kind = Some (Value _ | Uninit); ty } ->
             let store = Store.add_value id rval ty store in
@@ -295,7 +292,7 @@ module Make (State : State_intf.S) = struct
     | _ ->
         Fmt.kstr Csymex.not_impl "value of constant? %a" Fmt_ail.pp_constant c
 
-  let debug_show ~prog:_ ~args:_ state =
+  let debug_show ~args:_ state =
     let loc = get_loc () in
     let str = (Fmt.to_to_string (State.pp_pretty ~ignore_freed:false)) state in
     Csymex.push_give_up (str, loc);
@@ -303,20 +300,18 @@ module Make (State : State_intf.S) = struct
 
   let unwrap_expr (AnnotatedExpression (_, _, _, e) : expr) = e
 
-  let find_stub ~prog:_ (fname : Cerb_frontend.Symbol.sym) :
-      'err fun_exec option =
+  let find_stub (fname : Cerb_frontend.Symbol.sym) : 'err fun_exec option =
     let (Symbol (_, _, descr)) = fname in
     match descr with
     | Cerb_frontend.Symbol.SD_Id name -> (
         match name with
-        | "__soteria_nondet__" ->
-            Some (C_std.nondet_int_fun ~prog:(get_prog ()))
-        | "malloc" -> Some (C_std.malloc ~prog:(get_prog ()))
-        | "calloc" -> Some (C_std.calloc ~prog:(get_prog ()))
-        | "free" -> Some (C_std.free ~prog:(get_prog ()))
-        | "memcpy" -> Some (C_std.memcpy ~prog:(get_prog ()))
-        | "__assert__" -> Some (C_std.assert_ ~prog:(get_prog ()))
-        | "__soteria_debug_show" -> Some (debug_show ~prog:(get_prog ()))
+        | "__soteria_nondet__" -> Some C_std.nondet_int_fun
+        | "malloc" -> Some C_std.malloc
+        | "calloc" -> Some C_std.calloc
+        | "free" -> Some C_std.free
+        | "memcpy" -> Some C_std.memcpy
+        | "__assert__" -> Some C_std.assert_
+        | "__soteria_debug_show" -> Some debug_show
         | _ -> None)
     | _ -> None
 
@@ -517,12 +512,12 @@ module Make (State : State_intf.S) = struct
             InterpM.ok (loc, sym)
     in
     let@ () = InterpM.with_loc ~loc in
-    let prog = get_prog () in
-    let fundef_opt = Ail_helpers.find_fun_def ~prog fname in
+
+    let fundef_opt = Ail_helpers.find_fun_def fname in
     match fundef_opt with
     | Some fundef -> InterpM.ok (exec_fun fundef)
     | None -> (
-        match find_stub ~prog fname with
+        match find_stub fname with
         | Some stub -> InterpM.ok stub
         | None ->
             Fmt.kstr InterpM.not_impl "Cannot call external function: %a"
@@ -557,7 +552,7 @@ module Make (State : State_intf.S) = struct
         match unwrap_expr e with
         | AilEunary (Indirection, e) -> (* &*e <=> e *) eval_expr e
         | AilEident id -> (
-            let id = Ail_helpers.resolve_sym ~prog:(get_prog ()) id in
+            let id = Ail_helpers.resolve_sym id in
             let* ptr_opt = get_stack_address id in
             match ptr_opt with
             | Some ptr -> InterpM.ok (ptr :> T.cval Typed.t)
@@ -668,7 +663,7 @@ module Make (State : State_intf.S) = struct
             let lvalue = cast_to_ptr lvalue in
             InterpM.State.load lvalue ty)
     | AilEident id -> (
-        let id = Ail_helpers.resolve_sym ~prog:(get_prog ()) id in
+        let id = Ail_helpers.resolve_sym id in
         let* ptr_opt = get_stack_address id in
         match ptr_opt with
         | Some v ->
@@ -736,7 +731,7 @@ module Make (State : State_intf.S) = struct
       -> (
         match fexpr with
         | AilEident id ->
-            let id = Ail_helpers.resolve_sym ~prog:(get_prog ()) id in
+            let id = Ail_helpers.resolve_sym id in
             let ctx = get_fun_ctx () in
             let^ floc = Fun_ctx.decay_fn_sym id ctx in
             InterpM.ok (Typed.Ptr.mk floc 0s)

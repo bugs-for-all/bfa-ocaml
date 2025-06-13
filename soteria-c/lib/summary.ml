@@ -166,9 +166,9 @@ let rec analyse : type a.
           m "Analysing a summary for %s@\n%a"
             (Cerb_frontend.Symbol.show_symbol fid)
             pp_raw summary);
-      let arg_tys = Option.get (Ail_helpers.get_param_tys ~prog fid) in
+      let arg_tys = Option.get (Ail_helpers.get_param_tys fid) in
       let loc =
-        Ail_helpers.find_fun_loc ~prog fid
+        Ail_helpers.find_fun_loc fid
         |> Option.value ~default:Cerb_location.unknown
       in
       let manifest_leak =

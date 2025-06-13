@@ -212,9 +212,8 @@ let with_function_context prog f =
   let open Effect.Deep in
   let fctx = Fun_ctx.of_linked_program prog in
   Layout.Tag_defs.run_with_prog prog.sigma @@ fun () ->
-  try f () with
-  | effect Interp.Get_fun_ctx, k -> continue k fctx
-  | effect Interp.Get_prog, k -> continue k prog
+  Ail_helpers.run_with_prog prog @@ fun () ->
+  try f () with effect Interp.Get_fun_ctx, k -> continue k fctx
 
 let exec_main ~includes file_names =
   let open Syntaxes.Result in
