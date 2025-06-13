@@ -28,7 +28,7 @@ let generate_summaries_for ~prog (fundef : fundef) =
   let process =
     let open Csymex.Syntax in
     let* args = Csymex.all Layout.nondet_c_ty arg_tys in
-    let* result = Bi_interp.exec_fun fundef ~prog ~args Bi_state.empty in
+    let* result = Bi_interp.exec_fun fundef ~args Bi_state.empty in
     match result with
     | Ok (ret, bi_state) -> Csymex.return (args, Ok ret, bi_state)
     | Error (err, bi_state) -> Csymex.return (args, Error err, bi_state)
@@ -43,7 +43,6 @@ let generate_summaries_for ~prog (fundef : fundef) =
   Summary.make ~args ~ret ~pre ~post ~pc ()
 
 let generate_all_summaries ~functions_to_analyse prog =
-  Initialize_analysis.reinit prog.sigma;
   let order = Call_graph.weak_topological_order (Call_graph.of_prog prog) in
   let should_analyse =
     match functions_to_analyse with
