@@ -99,6 +99,7 @@ module Encoding = struct
             | F64 -> f64_of_bv v1
             | F128 -> f128_of_bv v1)
         | BvExtract (from_, to_) -> bv_extract to_ from_ v1
+        | BvExtend by -> bv_zero_extend by v1
         | FIs fc -> fp_is fc v1
         | FRound rm -> fp_round rm v1)
     | Binop (binop, v1, v2) -> (

@@ -84,7 +84,8 @@ module Unop = struct
     | BvOfInt
     | FloatOfBv
     | IntOfBv of bool (* signed *)
-    | BvExtract of int * int (* from * to *)
+    | BvExtract of int * int (* from idx (incl) * to idx (incl) *)
+    | BvExtend of int (* by N bits *)
     | FIs of FloatClass.t
     | FRound of FloatRoundingMode.t
   [@@deriving eq, ord]
@@ -100,6 +101,7 @@ module Unop = struct
     | FloatOfBv -> Fmt.string ft "bv2f"
     | IntOfBv _ -> Fmt.string ft "bv2i"
     | BvExtract (from, to_) -> Fmt.pf ft "extract[%d-%d]" from to_
+    | BvExtend by -> Fmt.pf ft "extend[%d]" by
     | FIs fc -> Fmt.pf ft "fis(%a)" FloatClass.pp fc
     | FRound mode -> Fmt.pf ft "fround(%a)" FloatRoundingMode.pp mode
 end
@@ -376,6 +378,18 @@ let rec bv_extract from_ to_ v =
       mk_commut_binop bop v1 v2 <| t_bv size
   | Unop (BvOfInt, v) when from_ = 0 -> Unop (BvOfInt, v) <| t_bv size
   | _ -> Unop (BvExtract (from_, to_), v) <| t_bv size
+
+let bv_extend to_ v =
+  let extend_by = to_ - size_of_bv v.node.ty in
+  match v.node.kind with
+  | BitVec bv ->
+      let to_ = to_ + 1 in
+      let bv = Z.(bv land pred (one lsl to_)) in
+      bitvec to_ bv
+  (* unlike with extract, we don't want to propagate extend within the expression for &, |, ^,
+     as that will require a more expensive bit-blasting. *)
+  | Unop (BvOfInt, v) -> Unop (BvOfInt, v) <| t_bv to_
+  | _ -> Unop (BvExtend extend_by, v) <| t_bv to_
 
 (** {2 Booleans} *)
 
@@ -717,7 +731,7 @@ let rec bv_of_int n v =
   | Unop (IntOfBv _, v) ->
       if size_of_bv v.node.ty = n then v
       else if size_of_bv v.node.ty > n then bv_extract 0 (n - 1) v
-      else failwith "can't extend a bitvector yet"
+      else bv_extend n v
   | Int z ->
       let z = if Z.geq z Z.zero then z else Z.neg z in
       bitvec n z

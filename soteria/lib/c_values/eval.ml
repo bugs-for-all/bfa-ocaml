@@ -30,6 +30,9 @@ let rec eval (x : t) : t =
         | IntOfBv signed -> int_of_bv signed nv
         | FloatOfBv -> float_of_bv nv
         | BvExtract (from, to_) -> bv_extract from to_ nv
+        | BvExtend by ->
+            let n = size_of_bv x.node.ty in
+            bv_extend (n + by) x
         | FIs fc -> is_floatclass fc nv
         | FRound rm -> float_round rm nv)
   | Binop (binop, v1, v2) -> (
