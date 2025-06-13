@@ -1,7 +1,14 @@
 (library
  (name soteria_c_values)
  (public_name soteria.c_values)
- (libraries soteria_symex simple_smt soteria_std hashcons fmt cmdliner)
+ (libraries
+  soteria_symex
+  simple_smt
+  soteria_std
+  hashcons
+  fmt
+  cmdliner
+  alt-ergo-lib)
  (flags :standard -open Soteria_std)
  (preprocess
   (pps ppx_deriving.std))

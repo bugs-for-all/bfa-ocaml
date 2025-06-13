@@ -244,12 +244,7 @@ let check_sat solver : Soteria_symex.Solver.result =
           m "Unexpected solver response: %s" (Sexplib.Sexp.to_string_hum s));
       Unknown
   in
-  match smt_res with
-  | Sat -> Sat
-  | Unsat -> Unsat
-  | Unknown ->
-      L.info (fun m -> m "Solver returned unknown");
-      Unknown
+  match smt_res with Sat -> Sat | Unsat -> Unsat | Unknown -> Unknown
 
 let push solver n = ack_command solver (Simple_smt.push n)
 let pop solver n = ack_command solver (Simple_smt.pop n)

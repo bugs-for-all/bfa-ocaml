@@ -492,6 +492,7 @@ module Make (Intf : Solver_interface.S) = struct
         let () =
           match answer with
           | Sat -> Solver_state.mark_checked solver.state
+          | Unknown -> L.info (fun m -> m "Solver returned unknown")
           | _ -> ()
         in
         answer
@@ -501,3 +502,4 @@ end
 
 module Z3_incremental_solver = Make_incremental (Z3_exe)
 module Z3_solver = Make (Z3_exe)
+module Alt_ergo_solver = Make (Alt_ergo_intf)

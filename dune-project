@@ -45,6 +45,8 @@
    (and
     :build
     (>= 3.14.0)))
+  (alt-ergo-lib
+   (>= 2.6.2))
   ppxlib
   (ppx_inline_test :with-test)
   (ocamlformat
