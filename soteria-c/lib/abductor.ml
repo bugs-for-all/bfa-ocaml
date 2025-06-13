@@ -8,7 +8,7 @@ module Summaries = struct
   module H = Hashtbl.Make (Ail_helpers.Symbol_std)
 end
 
-let generate_summaries_for ~prog (fundef : fundef) =
+let generate_summaries_for (fundef : fundef) =
   let open Syntaxes.List in
   let fid, (floc, _, _, _, _) = fundef in
   let section_name =
@@ -17,7 +17,7 @@ let generate_summaries_for ~prog (fundef : fundef) =
   let@ () = with_section section_name in
   L.info (fun m -> m "%s" section_name);
   let* arg_tys =
-    match Ail_helpers.get_param_tys ~prog fid with
+    match Ail_helpers.get_param_tys fid with
     | None ->
         L.info (fun m ->
             m "No argument types found for %a at loc %a" Fmt_ail.pp_sym fid
@@ -64,8 +64,8 @@ let generate_all_summaries ~functions_to_analyse prog =
   ListLabels.filter_map to_analyse ~f:(fun fid ->
       let open Syntaxes.Option in
       let res =
-        let+ fundef = Ail_helpers.find_fun_def ~prog fid in
-        let summaries = generate_summaries_for ~prog fundef in
+        let+ fundef = Ail_helpers.find_fun_def fid in
+        let summaries = generate_summaries_for fundef in
         (fid, summaries)
       in
       Progress_bar.signal_progress 1;

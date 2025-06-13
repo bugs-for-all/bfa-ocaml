@@ -11,6 +11,13 @@ module Symbol_std = struct
   let pp = Fmt_ail.pp_sym
 end
 
+type _ Effect.t += Get_prog : Ail_tys.linked_program Effect.t
+
+let get_prog () = Effect.perform Get_prog
+
+let run_with_prog (prog : Ail_tys.linked_program) f =
+  try f () with effect Get_prog, k -> Effect.Deep.continue k prog
+
 let sym_is_id sym id =
   let open Cerb_frontend.Symbol in
   match sym with Symbol (_digest, _i, SD_Id id') -> id = id' | _ -> false
@@ -20,15 +27,15 @@ let pp_sym_hum ft sym =
   | Cerb_frontend.Symbol.Symbol (_digest, _i, SD_Id id) -> Fmt.string ft id
   | _ -> Symbol_std.pp ft sym
 
-let rec resolve_sym ~(prog : Ail_tys.linked_program) sym =
+let rec resolve_sym ?(prog = get_prog ()) sym =
   match Pmap.lookup sym prog.symmap with
   | None -> sym
   | Some sym' ->
       if Symbol_std.equal sym sym' then sym else resolve_sym ~prog sym'
 
 (* TODO: handle qualifiers! *)
-let get_param_tys ~(prog : Ail_tys.linked_program) fid =
-  let fid = resolve_sym ~prog fid in
+let get_param_tys fid =
+  let fid = resolve_sym fid in
   List.find_map
     (fun (id, (_, _, decl)) ->
       if Cerb_frontend.Symbol.equal_sym id fid then
@@ -38,7 +45,7 @@ let get_param_tys ~(prog : Ail_tys.linked_program) fid =
             Some (List.map (fun (_, ty, _) -> ty) ptys)
         | _ -> None
       else None)
-    prog.sigma.declarations
+    (get_prog ()).sigma.declarations
 
 let find_fun_name ~(prog : Ail_tys.linked_program) to_find =
   List.find_map
@@ -46,14 +53,14 @@ let find_fun_name ~(prog : Ail_tys.linked_program) to_find =
       if sym_is_id sym to_find then Some decl else None)
     prog.sigma.function_definitions
 
-let find_fun_loc ~(prog : Ail_tys.linked_program) to_find =
+let find_fun_loc to_find =
   List.find_map
     (fun (id, (loc, _, _, _, _)) ->
       if Cerb_frontend.Symbol.equal_sym id to_find then Some loc else None)
-    prog.sigma.function_definitions
+    (get_prog ()).sigma.function_definitions
 
-let find_fun_def ~(prog : Ail_tys.linked_program)
-    (to_find : Cerb_frontend.Symbol.sym) =
+let find_fun_def (to_find : Cerb_frontend.Symbol.sym) =
+  let prog = get_prog () in
   let to_find = resolve_sym ~prog to_find in
   List.find_opt
     (fun (id, _) -> Cerb_frontend.Symbol.equal_sym id to_find)
