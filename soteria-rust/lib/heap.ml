@@ -128,7 +128,7 @@ let empty =
 let log action ptr st =
   L.trace (fun m ->
       m "About to execute action: %s at %a (%a)@\n@[<2>HEAP:@ %a@]" action
-        Sptr.pp ptr Charon.Meta.pp_span (get_loc ())
+        Sptr.pp ptr Charon_util.pp_span (get_loc ())
         (pp_pretty ~ignore_freed:true)
         st)
 

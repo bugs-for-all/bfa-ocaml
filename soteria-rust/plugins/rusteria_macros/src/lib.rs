@@ -3,7 +3,6 @@
 
 use {
     proc_macro::TokenStream,
-    proc_macro_error2::proc_macro_error,
     quote::{format_ident, quote},
     syn::{parse_macro_input, ItemFn},
 };

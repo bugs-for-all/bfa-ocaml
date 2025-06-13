@@ -156,3 +156,23 @@ let float_precision : Values.float_type -> Svalue.FloatPrecision.t = function
   | F32 -> F32
   | F64 -> F64
   | F128 -> F128
+
+let pp_span ft ({ span = { file; beg_loc; end_loc }; _ } : Meta.span) =
+  let clean_filename name =
+    let parts = String.split_on_char '/' name in
+    if List.compare_length_with parts 3 <= 0 then name
+    else
+      let last_3 = List.rev (List.take 3 (List.rev parts)) in
+      "../" ^ String.concat "/" last_3
+  in
+  let pp_filename ft ({ name; _ } : Meta.file) =
+    match name with
+    | Local name -> Fmt.string ft (clean_filename name)
+    | Virtual name -> Fmt.pf ft "%s (virtual)" (clean_filename name)
+  in
+  if beg_loc.line = end_loc.line then
+    Fmt.pf ft "%a:%d:%d-%d" pp_filename file beg_loc.line beg_loc.col
+      end_loc.col
+  else
+    Fmt.pf ft "%a:%d:%d-%d:%d" pp_filename file beg_loc.line beg_loc.col
+      end_loc.line end_loc.col

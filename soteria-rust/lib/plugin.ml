@@ -87,7 +87,7 @@ let default =
            "--translate-all-methods";
            "--extract-opaque-bodies";
            "--monomorphize";
-           "--mir promoted";
+           "--mir elaborated";
          ]
         @ opaques)
       ~rustc:
