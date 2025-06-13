@@ -227,7 +227,7 @@ let exec_main ~includes file_names =
         let open Csymex.Syntax in
         let** state = Wpst_interp.init_prog_state linked in
         L.debug (fun m -> m "@[<2>Initial state:@ %a@]" SState.pp state);
-        Wpst_interp.exec_fun ~prog:linked ~args:[] ~state entry_point
+        Wpst_interp.exec_fun entry_point ~prog:linked ~args:[] state
       in
       let@ () = with_function_context linked in
       Ok (Csymex.run symex)

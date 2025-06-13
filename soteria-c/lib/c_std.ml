@@ -7,7 +7,7 @@ module T = Typed.T
 let builtin_functions = [ "malloc"; "free"; "memcpy"; "calloc" ]
 
 module M (State : State_intf.S) = struct
-  let malloc ~prog:_ ~(args : T.cval Typed.t list) ~state =
+  let malloc ~prog:_ ~(args : T.cval Typed.t list) state =
     let* sz =
       match args with
       | [ sz ] -> return sz
@@ -22,7 +22,7 @@ module M (State : State_intf.S) = struct
           ]
     | None -> not_impl "malloc with non-integer argument"
 
-  let calloc ~prog:_ ~(args : T.cval Typed.t list) ~state =
+  let calloc ~prog:_ ~(args : T.cval Typed.t list) state =
     let* sz =
       match args with
       | [ num; sz ] -> (
@@ -39,7 +39,7 @@ module M (State : State_intf.S) = struct
         (fun () -> Result.ok (Typed.Ptr.null, state));
       ]
 
-  let free ~prog:_ ~(args : T.cval Typed.t list) ~state =
+  let free ~prog:_ ~(args : T.cval Typed.t list) state =
     let* ptr =
       match args with
       | [ ptr ] -> return ptr
@@ -55,7 +55,7 @@ module M (State : State_intf.S) = struct
     | TInt -> Fmt.kstr not_impl "free with int argument: %a" Typed.ppa ptr
     | _ -> Fmt.kstr not_impl "free with non-pointer argument: %a" Typed.ppa ptr
 
-  let memcpy ~prog:_ ~(args : T.cval Typed.t list) ~state =
+  let memcpy ~prog:_ ~(args : T.cval Typed.t list) state =
     let* dst, src, size =
       match args with
       | [ dst; src; size ] -> return (dst, src, size)
@@ -67,7 +67,7 @@ module M (State : State_intf.S) = struct
     let++ (), state = State.copy_nonoverlapping ~dst ~src ~size state in
     (dst, state)
 
-  let assert_ ~prog:_ ~(args : T.cval Typed.t list) ~state =
+  let assert_ ~prog:_ ~(args : T.cval Typed.t list) state =
     let open Typed.Infix in
     let* to_assert =
       match args with
@@ -79,7 +79,7 @@ module M (State : State_intf.S) = struct
     if%sat to_assert ==@ 0s then State.error `FailedAssert state
     else Result.ok (0s, state)
 
-  let nondet_int_fun ~prog:_ ~args:_ ~state =
+  let nondet_int_fun ~prog:_ ~args:_ state =
     let constrs = Layout.int_constraints (Ctype.Signed Int_) |> Option.get in
     let* v = Csymex.nondet ~constrs Typed.t_int in
     let v = (v :> T.cval Typed.t) in

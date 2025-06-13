@@ -28,7 +28,7 @@ let generate_summaries_for ~prog (fundef : fundef) =
   let process =
     let open Csymex.Syntax in
     let* args = Csymex.all Layout.nondet_c_ty arg_tys in
-    let* result = Bi_interp.exec_fun ~prog ~args ~state:Bi_state.empty fundef in
+    let* result = Bi_interp.exec_fun fundef ~prog ~args Bi_state.empty in
     match result with
     | Ok (ret, bi_state) -> Csymex.return (args, Ok ret, bi_state)
     | Error (err, bi_state) -> Csymex.return (args, Error err, bi_state)

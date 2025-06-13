@@ -51,6 +51,8 @@ let dump_unsupported () =
 let current_loc = ref Cerb_location.unknown
 let get_loc () = !current_loc
 
+(* FIXME: this is actually wrong because of branching.
+          the loc should probably be carried in the monad itself? *)
 let with_loc ~(loc : Cerb_location.t) f =
   let open Syntax in
   let old_loc = !current_loc in
