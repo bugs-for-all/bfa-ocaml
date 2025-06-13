@@ -166,15 +166,17 @@ module Make (Sptr : Sptr.S) = struct
         (* fieldless enums with one option are zero-sized *)
         | [ { fields = []; _ } ], _ -> []
         | variants, Int disc_z ->
-            let variant =
-              List.find
+            let vi, variant =
+              List.findi
                 (fun v -> Z.equal disc_z Types.(v.discriminant.value))
                 variants
             in
+            let vi = Types.VariantId.of_int vi in
+            (* FIXME: this is wrong *)
             let disc_ty =
               Types.TLiteral (TInteger variant.discriminant.int_ty)
             in
-            chain_cvals (of_variant variant) (Base disc :: vals)
+            chain_cvals (of_enum_variant t_id vi) (Base disc :: vals)
               (disc_ty :: field_tys variant.fields)
         | _ -> Fmt.failwith "Unexpected discriminant for enum: %a" pp_ty ty)
     | Base value, TAdt (TAdtId t_id, _) when Crate.is_enum t_id ->
@@ -287,7 +289,7 @@ module Make (Sptr : Sptr.S) = struct
           | Enum [] -> error `RefToUninhabited
           | Enum [ { fields = []; discriminant; _ } ] ->
               ok (Enum (value_of_scalar discriminant, []))
-          | Enum variants -> aux_enum offset variants
+          | Enum variants -> aux_enum type_decl.def_id offset variants
           | Union fs -> aux_union offset fs
           | _ ->
               Fmt.failwith "Unhandled ADT kind in rust_of_cvals: %a"
@@ -336,24 +338,29 @@ module Make (Sptr : Sptr.S) = struct
       in
       mk_callback fields []
     (* Parses what enum variant we're handling *)
-    and aux_enum offset (variants : Types.variant list) :
+    and aux_enum adt_id offset (variants : Types.variant list) :
         ('e, 'fix, 'state) parser =
       let disc = (List.hd variants).discriminant in
       let disc_ty = Values.TInteger disc.int_ty in
       let disc_align = Typed.nonzero (align_of_literal_ty disc_ty) in
+      let variants =
+        List.mapi (fun i v -> (Types.VariantId.of_int i, v)) variants
+      in
       let offset = offset +@ (offset %@ disc_align) in
       let*** cval = query (TLiteral disc_ty, offset) in
       let cval = Charon_util.as_base_of ~ty:Typed.t_int cval in
       let*** res =
         lift_rsymex
-        @@ match_on variants ~constr:(fun (v : Types.variant) ->
+        @@ match_on variants ~constr:(fun (_, (v : Types.variant)) ->
                cval ==@ value_of_scalar v.discriminant)
       in
       match res with
-      | Some var ->
+      | Some (var_i, var) ->
           (* skip discriminant *)
           let discr = value_of_scalar var.discriminant in
-          let ({ members_ofs = mems; _ } as layout) = of_variant var in
+          let ({ members_ofs = mems; _ } as layout) =
+            of_enum_variant adt_id var_i
+          in
           let members_ofs = Array.sub mems 1 (Array.length mems - 1) in
           let layout = { layout with members_ofs } in
           var.fields

@@ -86,3 +86,10 @@ and[@tail_mod_cons] prepend_concat_map2 zs f xs ys =
   match zs with
   | [] -> concat_map2 f xs ys
   | z :: zs -> z :: prepend_concat_map2 zs f xs ys
+
+let findi f =
+  let rec aux i = function
+    | [] -> raise Not_found
+    | x :: l -> if f x then (i, x) else aux (i + 1) l
+  in
+  aux 0

@@ -28,7 +28,10 @@ let pp_layout fmt { size; align; members_ofs } =
 module Session = struct
   (* TODO: allow different caches for different crates *)
   (** Cache of (type or variant) -> layout *)
-  let layout_cache : ((Types.ty, Types.variant) Either.t, layout) Hashtbl.t =
+  let layout_cache :
+      ( (Types.ty, Types.type_decl_id * Types.variant_id) Either.t,
+        layout )
+      Hashtbl.t =
     Hashtbl.create 128
 
   let get_or_compute_cached_layout ty f =
@@ -129,35 +132,65 @@ let rec layout_of (ty : Types.ty) : layout =
   (* Custom ADTs (struct, enum, etc.) *)
   | TAdt (TAdtId id, _) -> (
       let adt = Crate.get_adt id in
-      match adt.kind with
-      | Struct fields -> layout_of_members @@ field_tys fields
-      | Enum [] -> { size = 0; align = 1; members_ofs = [||] }
-      (* fieldless enums with one variant are zero-sized *)
-      | Enum [ { fields = []; _ } ] ->
-          { size = 0; align = 1; members_ofs = [||] }
-      | Enum variants ->
-          let layouts = List.map of_variant variants in
+      match adt.layout with
+      | Some
+          {
+            size = Some size;
+            align = Some align;
+            variant_layouts = [ layout ];
+            _;
+          }
+        when match adt.kind with Enum _ -> false | _ -> true ->
+          (* If the layout is already computed, use it *)
+          let members_ofs = Array.of_list @@ layout.field_offsets in
+          { size; align; members_ofs }
+      | Some { variant_layouts; _ }
+        when match adt.kind with
+             | Enum vs -> 0 = List.compare_lengths variant_layouts vs
+             | _ -> false ->
+          let variants = match adt.kind with Enum vs -> vs | _ -> [] in
+          let layouts =
+            Types.VariantId.mapi
+              (fun i _ -> of_variant ~layout:adt.layout adt i)
+              variants
+          in
           List.fold_left
             (fun acc l -> if l.size > acc.size then l else acc)
             (List.hd layouts) (List.tl layouts)
-      | Opaque ->
-          let msg = Fmt.str "Opaque %a " Crate.pp_name adt.item_meta.name in
-          raise (CantComputeLayout (msg, ty))
-      | Union fs ->
-          let layouts = List.map layout_of @@ Charon_util.field_tys fs in
-          let hd = List.hd layouts in
-          let tl = List.tl layouts in
-          let size, align =
-            List.fold_left
-              (fun (size, align) l -> (max size l.size, max align l.align))
-              (hd.size, hd.align) tl
-          in
-          let size = size_to_fit ~size ~align in
-          (* All fields in the union start at 0 and overlap *)
-          let members_ofs = Array.init (List.length fs) (fun _ -> 0) in
-          { size; align; members_ofs }
-      | TDeclError _ -> raise (CantComputeLayout ("DeclError", ty))
-      | Alias _ -> raise (CantComputeLayout ("Alias", ty)))
+      | _ -> (
+          match adt.kind with
+          | Struct fields -> layout_of_members @@ field_tys fields
+          | Enum [] -> { size = 0; align = 1; members_ofs = [||] }
+          (* fieldless enums with one variant are zero-sized *)
+          | Enum [ { fields = []; _ } ] ->
+              { size = 0; align = 1; members_ofs = [||] }
+          | Enum variants ->
+              let layouts =
+                Types.VariantId.mapi
+                  (fun i _ -> of_variant ~layout:None adt i)
+                  variants
+              in
+              List.fold_left
+                (fun acc l -> if l.size > acc.size then l else acc)
+                (List.hd layouts) (List.tl layouts)
+          | Opaque ->
+              let msg = Fmt.str "Opaque %a " Crate.pp_name adt.item_meta.name in
+              raise (CantComputeLayout (msg, ty))
+          | Union fs ->
+              let layouts = List.map layout_of @@ Charon_util.field_tys fs in
+              let hd = List.hd layouts in
+              let tl = List.tl layouts in
+              let size, align =
+                List.fold_left
+                  (fun (size, align) l -> (max size l.size, max align l.align))
+                  (hd.size, hd.align) tl
+              in
+              let size = size_to_fit ~size ~align in
+              (* All fields in the union start at 0 and overlap *)
+              let members_ofs = Array.init (List.length fs) (fun _ -> 0) in
+              { size; align; members_ofs }
+          | TDeclError _ -> raise (CantComputeLayout ("DeclError", ty))
+          | Alias _ -> raise (CantComputeLayout ("Alias", ty))))
   (* Arrays *)
   | TAdt (TBuiltin TArray, { types = [ ty ]; const_generics = [ size ]; _ }) ->
       let len = Charon_util.int_of_const_generic size in
@@ -202,16 +235,53 @@ and layout_of_members members =
     members_ofs = Array.of_list members_ofs;
   }
 
-and of_variant (variant : Types.variant) =
-  Session.get_or_compute_cached_layout_var variant @@ fun () ->
-  let discr_ty = Types.TLiteral (TInteger variant.discriminant.int_ty) in
-  let members = discr_ty :: field_tys variant.fields in
-  layout_of_members members
+and of_variant ~(layout : Types.layout option) (enum : Types.type_decl)
+    (variant : Types.variant_id) : layout =
+  Session.get_or_compute_cached_layout_var (enum.def_id, variant) @@ fun () ->
+  match layout with
+  | Some
+      {
+        size = Some size;
+        align = Some align;
+        discriminant_offset = Some d_ofs;
+        variant_layouts;
+        _;
+      } ->
+      let variant_layout = Types.VariantId.nth variant_layouts variant in
+      let members_ofs =
+        Array.of_list @@ (d_ofs :: variant_layout.field_offsets)
+      in
+      { size; align; members_ofs }
+  | _ ->
+      let variant =
+        match enum.kind with
+        | Enum vs -> Types.VariantId.nth vs variant
+        | _ -> failwith "of_variant: not an enum"
+      in
+      let discr_ty = Types.TLiteral (TInteger variant.discriminant.int_ty) in
+      let members = discr_ty :: field_tys variant.fields in
+      layout_of_members members
 
 and of_enum_variant adt_id variant =
-  let variants = Crate.as_enum adt_id in
-  let variant = Types.VariantId.nth variants variant in
-  of_variant variant
+  let adt = Crate.get_adt adt_id in
+  of_variant ~layout:adt.layout adt variant
+
+and of_enum_discr adt_id discr =
+  let adt = Crate.get_adt adt_id in
+  let variants =
+    match adt.kind with
+    | Enum vs -> vs
+    | _ -> failwith "of_enum_discr: not an enum"
+  in
+  let variant_i =
+    variants
+    |> List.find_index (fun (v : Types.variant) ->
+           Z.equal v.discriminant.value discr)
+    |> Option.map Types.VariantId.of_int
+  in
+  match variant_i with
+  | Some variant -> of_variant ~layout:adt.layout adt variant
+  | None -> failwith "of_enum_discr: no such variant"
 
 and resolve_trait_ty (tref : Types.trait_ref) ty_name =
   match tref.trait_id with
