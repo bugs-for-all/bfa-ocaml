@@ -488,6 +488,10 @@ module Make (State : State_intf.S) = struct
         else InterpM.error `UBPointerComparison
     | _ -> InterpM.error `UBPointerComparison
 
+  module Stmt_exec_result = struct
+    type t = Normal | Continue | Break | Returned of T.cval Typed.t
+  end
+
   let rec resolve_function fexpr : Error.t State.err fun_exec InterpM.t =
     let* loc, fname =
       let (AilSyntax.AnnotatedExpression (_, _, loc, inner_expr)) = fexpr in
@@ -763,7 +767,8 @@ module Make (State : State_intf.S) = struct
 
   (** Executing a statement returns an optional value outcome (if a return
       statement was hit), or *)
-  and exec_stmt (astmt : stmt) : T.cval Typed.t option InterpM.t =
+  and exec_stmt (astmt : stmt) : Stmt_exec_result.t InterpM.t =
+    let open Stmt_exec_result in
     let^ () = Csymex.consume_fuel_steps 1 in
     L.debug (fun m -> m "Executing statement: %a" Fmt_ail.pp_stmt astmt);
     let* () =
@@ -774,20 +779,19 @@ module Make (State : State_intf.S) = struct
     let AilSyntax.{ loc; node = stmt; _ } = astmt in
     let@ () = InterpM.with_loc ~loc in
     match stmt with
-    | AilSskip -> InterpM.ok None
+    | AilSskip -> InterpM.ok Normal
     | AilSreturn e ->
         let+ v = eval_expr e in
         L.debug (fun m -> m "Returning: %a" Typed.ppa v);
-        Some v
-    | AilSreturnVoid -> InterpM.ok (Some 0s)
+        Returned v
+    | AilSreturnVoid -> InterpM.ok (Returned 0s)
     | AilSblock (bindings, stmtl) ->
         let* () = attach_bindings bindings in
         (* Second result, corresponding to the block-scoped store, is discarded *)
         let* res =
-          InterpM.fold_list stmtl ~init:None ~f:(fun res stmt ->
-              match res with Some _ -> InterpM.ok res | None -> exec_stmt stmt)
+          InterpM.fold_list stmtl ~init:Normal ~f:(fun res stmt ->
+              match res with Normal -> exec_stmt stmt | _ -> InterpM.ok res)
         in
-
         (* Cerberus is nice here, symbols inside the block have different names than
            the ones outside the block if there is shadowing going on.
            I.e. int x = 12; { int x = 13; }, the two `x`s have different symbols.
@@ -796,7 +800,7 @@ module Make (State : State_intf.S) = struct
         res
     | AilSexpr e ->
         let+ _ = eval_expr e in
-        None
+        Normal
     | AilSif (cond, then_stmt, else_stmt) ->
         let* v = eval_expr cond in
         (* [v] must be an integer! (TODO: or NULL possibly...) *)
@@ -808,18 +812,22 @@ module Make (State : State_intf.S) = struct
           let* cond_v = eval_expr cond in
           if%sat cast_to_bool cond_v then
             let* res = exec_stmt stmt in
-            match res with Some _ -> InterpM.ok res | None -> loop ()
-          else InterpM.ok None
+            match res with
+            | Returned _ -> InterpM.ok res
+            | Break -> InterpM.ok Normal
+            | Normal | Continue -> loop ()
+          else InterpM.ok Normal
         in
         loop ()
     | AilSdo (stmt, cond, _loop_id) ->
         let rec loop () =
           let* res = exec_stmt stmt in
           match res with
-          | Some _ -> InterpM.ok res
-          | None ->
+          | Returned _ -> InterpM.ok res
+          | Break -> InterpM.ok Normal
+          | Normal | Continue ->
               let* cond_v = eval_expr cond in
-              if%sat cast_to_bool cond_v then loop () else InterpM.ok None
+              if%sat cast_to_bool cond_v then loop () else InterpM.ok Normal
         in
         loop ()
     | AilSlabel (_label, stmt, _annot) ->
@@ -834,8 +842,15 @@ module Make (State : State_intf.S) = struct
                   let* v = eval_expr expr in
                   InterpM.map_store (Store.declare_value pname v))
         in
-        None
-    | _ ->
+        Normal
+    | AilSbreak -> InterpM.ok Break
+    | AilScontinue -> InterpM.ok Continue
+    | AilSswitch (_, _)
+    | AilScase (_, _)
+    | AilScase_rangeGNU (_, _, _)
+    | AilSdefault _ | AilSgoto _ | AilSpar _
+    | AilSreg_store (_, _)
+    | AilSmarker (_, _) ->
         Fmt.kstr InterpM.not_impl "Unsupported statement: %a" Fmt_ail.pp_stmt
           astmt
 
@@ -850,10 +865,10 @@ module Make (State : State_intf.S) = struct
     let* ptys = get_param_tys name in
     let ps = List.combine3 params ptys args in
     let store = mk_store ps in
-    let** val_opt, store, state = exec_stmt stmt store state in
+    let** res, store, state = exec_stmt stmt store state in
     let++ state = dealloc_store store state in
     (* We model void as zero, it should never be used anyway *)
-    let value = Option.value ~default:0s val_opt in
+    let value = match res with Returned v -> v | _ -> 0s in
     (value, state)
 
   let init_prog_state (prog : Ail_tys.linked_program) =

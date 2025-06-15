@@ -1,7 +1,7 @@
 open Cerb_frontend
 open AilSyntax
-module Sym_set = Set.Make (Ail_helpers.Symbol_std)
-module Sym_map = Map.Make (Ail_helpers.Symbol_std)
+module Sym_set = Symbol_std.Set
+module Sym_map = Symbol_std.Map
 
 type extern_idmap = (Symbol.identifier, sigma_extern_id) Pmap.map
 type redundant_globs = (Symbol.sym * Symbol.sym) list
@@ -280,6 +280,7 @@ let link_aux ((m1, f1) : 'a ail_program) ((m2, f2) : 'a ail_program)
         };
       entry_point = m;
       symmap;
+      label_cache = Hashtbl.create 0;
     }
 
 let link : Ail_tys.program list -> (Ail_tys.linked_program, string) result =
@@ -296,7 +297,9 @@ let link : Ail_tys.program list -> (Ail_tys.linked_program, string) result =
           sigma.extern_idmap
           (Pmap.empty Symbol.compare_sym)
       in
-      let init_linked = { entry_point; sigma; symmap } in
+      let init_linked =
+        { entry_point; sigma; symmap; label_cache = Hashtbl.create 0 }
+      in
       List.fold_left
         (fun acc f' ->
           Result.bind acc
@@ -305,6 +308,7 @@ let link : Ail_tys.program list -> (Ail_tys.linked_program, string) result =
                 entry_point = entry_point_acc;
                 sigma = sigma_acc;
                 symmap = symmap_acc;
+                label_cache = _;
               }
           -> link_aux (entry_point_acc, sigma_acc) f' symmap_acc)
         (Ok init_linked) fs

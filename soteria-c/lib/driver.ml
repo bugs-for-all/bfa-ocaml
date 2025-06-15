@@ -360,7 +360,7 @@ let show_ail logs_config term_config (includes : string list)
   Soteria_logs.Config.check_set_and_lock logs_config;
   Soteria_terminal.Config.set_and_lock term_config;
   match parse_and_link_ail ~includes files with
-  | Ok { symmap; sigma; entry_point } ->
+  | Ok { symmap; sigma; entry_point; label_cache = _ } ->
       Fmt.pr "@[<v 2>Extern idmap:@ %a@]@\n@\n"
         Fmt.(
           iter_bindings ~sep:semi Pmap.iter

@@ -1,16 +1,3 @@
-(*** More standard interface to [Symbol], making it nicer for 
-   using with Stdlib functors *)
-module Symbol_std = struct
-  open Cerb_frontend.Symbol
-
-  type t = Cerb_frontend.Symbol.sym
-
-  let equal = equal_sym
-  let compare = compare_sym
-  let hash = Hashtbl.hash
-  let pp = Fmt_ail.pp_sym
-end
-
 type _ Effect.t += Get_prog : Ail_tys.linked_program Effect.t
 
 let get_prog () = Effect.perform Get_prog
