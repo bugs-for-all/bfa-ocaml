@@ -58,8 +58,6 @@ module Frontend = struct
         in
         Error (`ParsingError msg, Call_trace.singleton ~loc ())
 
-  let frontend = ref (fun ~cpp_cmd:_ _ -> failwith "Frontend not set")
-
   let include_libc () =
     let root_includes = Cerb_runtime.in_runtime "libc/include" in
     let posix = Filename.concat root_includes "posix" in
@@ -109,21 +107,22 @@ module Frontend = struct
     in
     let () = Cerb_colour.do_colour := false in
     match result with
-    | Exception.Result f -> frontend := f
+    | Exception.Result f -> f
     | Exception.Exception err ->
         Fmt.failwith "Failed to initialize frontend: %s"
           (Pp_errors.to_string err)
 
-  let () = Initialize_analysis.register_once_initialiser init
+  let frontend = lazy (init ())
 
   let frontend ?cwd ~cpp_cmd filename =
     L.debug (fun m -> m "Parsing %s" filename);
     try
       let cerb_res =
         match cwd with
-        | None -> !frontend ~cpp_cmd filename
+        | None -> (Lazy.force frontend) ~cpp_cmd filename
         | Some dir ->
-            Sys.with_working_dir dir @@ fun () -> !frontend ~cpp_cmd filename
+            Sys.with_working_dir dir @@ fun () ->
+            (Lazy.force frontend) ~cpp_cmd filename
       in
       lift_parsing_result cerb_res
     with Sys_error err ->
@@ -212,6 +211,8 @@ let resolve_entry_point (linked : Ail_tys.linked_program) =
 let with_function_context prog f =
   let open Effect.Deep in
   let fctx = Fun_ctx.of_linked_program prog in
+  Layout.Tag_defs.run_with_prog prog.sigma @@ fun () ->
+  Ail_helpers.run_with_prog prog @@ fun () ->
   try f () with effect Interp.Get_fun_ctx, k -> continue k fctx
 
 let exec_main ~includes file_names =
@@ -221,13 +222,11 @@ let exec_main ~includes file_names =
     if !Config.current.parse_only then Ok []
     else
       let* entry_point = resolve_entry_point linked in
-      let sigma = linked.sigma in
-      let () = Initialize_analysis.reinit sigma in
       let symex =
         let open Csymex.Syntax in
         let** state = Wpst_interp.init_prog_state linked in
         L.debug (fun m -> m "@[<2>Initial state:@ %a@]" SState.pp state);
-        Wpst_interp.exec_fun entry_point ~prog:linked ~args:[] state
+        Wpst_interp.exec_fun entry_point ~args:[] state
       in
       let@ () = with_function_context linked in
       Ok (Csymex.run symex)
@@ -269,8 +268,7 @@ let initialise log_config term_config solver_config config =
   Soteria_logs.Config.check_set_and_lock log_config;
   Soteria_terminal.Config.set_and_lock term_config;
   Solver_config.set solver_config;
-  Config.set config;
-  Initialize_analysis.init_once ()
+  Config.set config
 
 (* Entry point function *)
 let exec_main_and_print log_config term_config solver_config config includes
@@ -329,10 +327,8 @@ let analyse_summaries ~prog results =
   (fid, results)
 
 let generate_summaries ~functions_to_analyse prog =
-  let results =
-    let@ () = with_function_context prog in
-    Abductor.generate_all_summaries ~functions_to_analyse prog
-  in
+  let@ () = with_function_context prog in
+  let results = Abductor.generate_all_summaries ~functions_to_analyse prog in
   Csymex.dump_unsupported ();
   let results = analyse_summaries ~prog results in
   dump_summaries ~prog results;
@@ -356,7 +352,6 @@ let generate_summaries ~functions_to_analyse prog =
 (* Entry point function *)
 let lsp config () =
   Config.set config;
-  Initialize_analysis.init_once ();
   Soteria_c_lsp.run ~generate_errors ()
 
 (* Entry point function *)
@@ -364,7 +359,6 @@ let show_ail logs_config term_config (includes : string list)
     (files : string list) =
   Soteria_logs.Config.check_set_and_lock logs_config;
   Soteria_terminal.Config.set_and_lock term_config;
-  Initialize_analysis.init_once ();
   match parse_and_link_ail ~includes files with
   | Ok { symmap; sigma; entry_point } ->
       Fmt.pr "@[<v 2>Extern idmap:@ %a@]@\n@\n"

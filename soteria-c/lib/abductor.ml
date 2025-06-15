@@ -8,7 +8,7 @@ module Summaries = struct
   module H = Hashtbl.Make (Ail_helpers.Symbol_std)
 end
 
-let generate_summaries_for ~prog (fundef : fundef) =
+let generate_summaries_for (fundef : fundef) =
   let open Syntaxes.List in
   let fid, (floc, _, _, _, _) = fundef in
   let section_name =
@@ -17,7 +17,7 @@ let generate_summaries_for ~prog (fundef : fundef) =
   let@ () = with_section section_name in
   L.info (fun m -> m "%s" section_name);
   let* arg_tys =
-    match Ail_helpers.get_param_tys ~prog fid with
+    match Ail_helpers.get_param_tys fid with
     | None ->
         L.info (fun m ->
             m "No argument types found for %a at loc %a" Fmt_ail.pp_sym fid
@@ -28,7 +28,7 @@ let generate_summaries_for ~prog (fundef : fundef) =
   let process =
     let open Csymex.Syntax in
     let* args = Csymex.all Layout.nondet_c_ty arg_tys in
-    let* result = Bi_interp.exec_fun fundef ~prog ~args Bi_state.empty in
+    let* result = Bi_interp.exec_fun fundef ~args Bi_state.empty in
     match result with
     | Ok (ret, bi_state) -> Csymex.return (args, Ok ret, bi_state)
     | Error (err, bi_state) -> Csymex.return (args, Error err, bi_state)
@@ -43,7 +43,6 @@ let generate_summaries_for ~prog (fundef : fundef) =
   Summary.make ~args ~ret ~pre ~post ~pc ()
 
 let generate_all_summaries ~functions_to_analyse prog =
-  Initialize_analysis.reinit prog.sigma;
   let order = Call_graph.weak_topological_order (Call_graph.of_prog prog) in
   let should_analyse =
     match functions_to_analyse with
@@ -65,8 +64,8 @@ let generate_all_summaries ~functions_to_analyse prog =
   ListLabels.filter_map to_analyse ~f:(fun fid ->
       let open Syntaxes.Option in
       let res =
-        let+ fundef = Ail_helpers.find_fun_def ~prog fid in
-        let summaries = generate_summaries_for ~prog fundef in
+        let+ fundef = Ail_helpers.find_fun_def fid in
+        let summaries = generate_summaries_for fundef in
         (fid, summaries)
       in
       Progress_bar.signal_progress 1;

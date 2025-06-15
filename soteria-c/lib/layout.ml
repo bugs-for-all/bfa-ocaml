@@ -13,35 +13,42 @@ type layout = {
 module Tag_defs = struct
   type def = Cerb_location.t * Cerb_frontend.Ctype.tag_definition
 
-  let current_defs : (CF.Symbol.sym, def) Hashtbl.t = Hashtbl.create 1020
-  let cached_layouts : (CF.Ctype.ctype, layout) Hashtbl.t = Hashtbl.create 1020
+  type _ Effect.t +=
+    | Find_tag : CF.Symbol.sym -> def option Effect.t
+    | Find_layout_cache : CF.Ctype.ctype -> layout option Effect.t
+    | Add_layout_cache : CF.Ctype.ctype * layout -> unit Effect.t
 
-  let find_opt id =
-    match Hashtbl.find_opt current_defs id with
+  let find_opt id tbl =
+    match Hashtbl.find_opt tbl id with
     | Some x -> Some x
     | None ->
         L.debug (fun m -> m "Cannot find definition for %a" Fmt_ail.pp_sym id);
         None
 
-  let add_defs defs =
-    List.iter
-      (fun (id, (loc, _, def)) -> Hashtbl.add current_defs id (loc, def))
-      defs
+  let add_defs defs tbl =
+    List.iter (fun (id, (loc, _, def)) -> Hashtbl.add tbl id (loc, def)) defs
 
   let get_or_compute_cached_layout id f =
-    match Hashtbl.find_opt cached_layouts id with
+    match Effect.perform (Find_layout_cache id) with
     | Some layout -> Some layout
     | None ->
         let open Syntaxes.Option in
         let* layout = f () in
-        Hashtbl.add cached_layouts id layout;
+        Effect.perform (Add_layout_cache (id, layout));
         Some layout
 
-  let () =
-    Initialize_analysis.register_before_each_initialiser (fun sigma ->
-        Hashtbl.clear current_defs;
-        Hashtbl.clear cached_layouts;
-        add_defs sigma.tag_definitions)
+  let run_with_prog (sigma : Ail_tys.sigma) f =
+    let open Effect.Deep in
+    let tag_defs = Hashtbl.create 1020 in
+    let layouts = Hashtbl.create 1020 in
+    add_defs sigma.tag_definitions tag_defs;
+    try f () with
+    | effect Find_tag id, k -> continue k (find_opt id tag_defs)
+    | effect Find_layout_cache ty, k -> continue k (Hashtbl.find_opt layouts ty)
+    | effect Add_layout_cache (ty, l), k ->
+        continue k (Hashtbl.replace layouts ty l)
+
+  let find_opt id = Effect.perform (Find_tag id)
 end
 
 let is_int (Ctype (_, ty)) =
